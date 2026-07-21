@@ -1,0 +1,49 @@
+# ── Maven ──────────────────────────────────────────────────────
+# 'target/' is where Maven puts compiled classes and built jars.
+# It is GENERATED — never source code. Never commit it.
+target/
+*.jar
+*.war
+
+# ── IDE ────────────────────────────────────────────────────────
+# IntelliJ IDEA project files
+.idea/
+*.iml
+*.iws
+
+# VS Code
+.vscode/
+
+# Eclipse
+.eclipse/
+.classpath
+.project
+.settings/
+
+# ── Secrets — CRITICAL ─────────────────────────────────────────
+# These files contain API keys, passwords, tokens.
+# If ANY of these reach GitHub your credentials are compromised.
+.env
+.env.local
+*.pem
+*.key
+application-local.properties
+application-secrets.properties
+
+# ── OS files ───────────────────────────────────────────────────
+.DS_Store        # Mac OS metadata files
+Thumbs.db        # Windows thumbnail cache
+
+# ── Logs ───────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Terraform ──────────────────────────────────────────────────
+# .terraform/ contains downloaded provider binaries (hundreds of MB)
+# *.tfstate contains your real infrastructure state
+# *.tfvars contains real passwords
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.backup
+infra/*.tfvars
+infra/.terraform.lock.hcl
