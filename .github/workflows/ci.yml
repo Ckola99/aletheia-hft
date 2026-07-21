@@ -42,7 +42,7 @@ jobs:
       # Step 3: Compile everything and run all tests
       # This is the same command you run locally
       - name: Build and run tests
-        run: ./mvnw clean verify
+        run: ./mvnw clean verify -Dspring.profiles.active=test
 
       # Step 4: Save the test coverage report as a downloadable file
       # 'if: always()' means: upload even if tests failed
