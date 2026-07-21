@@ -1,0 +1,106 @@
+# ═══════════════════════════════════════════════════════════════════
+# Aletheia — Local Development Environment
+# ═══════════════════════════════════════════════════════════════════
+# Start:   docker compose -f docker/docker-compose.dev.yml up -d
+# Stop:    docker compose -f docker/docker-compose.dev.yml down
+# Destroy: docker compose -f docker/docker-compose.dev.yml down -v
+#          (-v also deletes all stored data — use intentionally)
+# ═══════════════════════════════════════════════════════════════════
+
+services:
+
+  # ── TimescaleDB ──────────────────────────────────────────────────
+  # Stores: ticks, candles, trades, economic calendar events.
+  # TimescaleDB = PostgreSQL + time-series superpowers.
+  # Your Java app connects on localhost:5432 during development.
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: aletheia-timescaledb
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: aletheia
+      POSTGRES_USER: alethia
+      POSTGRES_PASSWORD: dev_only
+    volumes:
+      # Named volume — data survives container restarts
+      - timescale_data:/var/lib/postgresql/data
+      # Any .sql file here runs automatically on FIRST start
+      - ../sql/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alethia -d aletheia"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  # ── Redis ────────────────────────────────────────────────────────
+  # In-memory cache for the economic calendar news guard.
+  # The EconomicCalendarService reads upcoming events from here
+  # instead of hitting the database on every tick.
+  redis:
+    image: redis:7-alpine
+    container_name: aletheia-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Prometheus ───────────────────────────────────────────────────
+  # Scrapes metrics from your Java app every 15 seconds.
+  # Your app exposes metrics at /actuator/prometheus.
+  # Prometheus stores them as time series data.
+  # Grafana reads from Prometheus to draw dashboards.
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: aletheia-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    restart: unless-stopped
+
+  # ── Grafana ──────────────────────────────────────────────────────
+  # Dashboard UI. Open http://localhost:3000 (admin/admin).
+  # Connects to Prometheus automatically via the provisioned datasource.
+  grafana:
+    image: grafana/grafana:latest
+    container_name: aletheia-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ../grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ../grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  # ── Adminer ──────────────────────────────────────────────────────
+  # Lightweight web UI to browse your database.
+  # Open http://localhost:8081
+  # Login: System=PostgreSQL, Server=timescaledb,
+  #        User=alethia, Password=dev_only, Database=aletheia
+  adminer:
+    image: adminer:latest
+    container_name: aletheia-adminer
+    ports:
+      - "8081:8080"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  timescale_data:
+  prometheus_data:
+  grafana_data:
