@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.aletheia</groupId>
+        <artifactId>aletheia-hft</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>aletheia-calendar</artifactId>
+    <packaging>jar</packaging>
+    <name>Aletheia Calendar — Economic Calendar Guard</name>
+    <description>
+        Forex Factory scraper, EconomicCalendarService with in-memory cache,
+        PreTradeGuard (news blackout detection).
+    </description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.aletheia</groupId>
+            <artifactId>aletheia-core</artifactId>
+        </dependency>
+        <!-- Spring Boot base — needed for @Service, @Scheduled annotations -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <!-- PostgreSQL — to persist scraped calendar events -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+        </dependency>
+        <!--
+            Jsoup — HTML parser for scraping Forex Factory.
+            The only library we need to parse HTML in Java.
+        -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+        </dependency>
+    </dependencies>
+
+</project>

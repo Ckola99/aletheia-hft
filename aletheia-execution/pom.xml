@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.aletheia</groupId>
+        <artifactId>aletheia-hft</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>aletheia-execution</artifactId>
+    <packaging>jar</packaging>
+    <name>Aletheia Execution — Order Management</name>
+    <description>
+        OANDA REST API integration, Order Management System,
+        circuit breaker, position monitor, kill switch.
+    </description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.aletheia</groupId>
+            <artifactId>aletheia-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.aletheia</groupId>
+            <artifactId>aletheia-strategy</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.aletheia</groupId>
+            <artifactId>aletheia-calendar</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>okhttp</artifactId>
+        </dependency>
+        <!--
+            Resilience4j — circuit breaker library.
+            When OANDA API fails repeatedly, the circuit "opens"
+            and stops sending requests until the API recovers.
+            Prevents cascading failures.
+        -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-spring-boot3</artifactId>
+        </dependency>
+    </dependencies>
+
+</project>

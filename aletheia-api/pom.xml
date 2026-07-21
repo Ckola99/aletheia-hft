@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.aletheia</groupId>
+        <artifactId>aletheia-hft</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>aletheia-api</artifactId>
+    <packaging>jar</packaging>
+    <name>Aletheia API — Application Entry Point</name>
+    <description>
+        Spring Boot main application. Wires all modules together.
+        Contains the main() method, REST monitoring endpoints,
+        and application configuration.
+    </description>
+
+    <dependencies>
+        <!-- Pull in every module — this is the assembler -->
+        <dependency>
+            <groupId>com.aletheia</groupId>
+            <artifactId>aletheia-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.aletheia</groupId>
+            <artifactId>aletheia-strategy</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.aletheia</groupId>
+            <artifactId>aletheia-data</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.aletheia</groupId>
+            <artifactId>aletheia-calendar</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.aletheia</groupId>
+            <artifactId>aletheia-execution</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.aletheia</groupId>
+            <artifactId>aletheia-backtest</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.aletheia</groupId>
+            <artifactId>aletheia-observability</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+                Spring Boot Maven Plugin — creates a fat/uber jar.
+                A fat jar contains your code AND all dependencies bundled
+                inside one file. Run it with: java -jar aletheia-api.jar
+                This is what you deploy to AWS ECS.
+            -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

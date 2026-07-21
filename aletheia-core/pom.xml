@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+        PARENT reference — this child inherits everything from
+        the root pom.xml: all dependency versions, all plugin config,
+        all testing libraries. We don't repeat any of that here.
+    -->
+    <parent>
+        <groupId>com.aletheia</groupId>
+        <artifactId>aletheia-hft</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <!--
+        This module's own identity.
+        Notice: no <groupId> — it inherits com.aletheia from parent.
+        Notice: no <version> — it inherits 0.1.0-SNAPSHOT from parent.
+        We only declare what is DIFFERENT from the parent.
+    -->
+    <artifactId>aletheia-core</artifactId>
+    <packaging>jar</packaging>
+    <name>Aletheia Core — Domain Models</name>
+    <description>
+        Pure Java domain models. Zero framework dependencies.
+        Contains: Tick, Candle, PriceScale, Timeframe, MarketBias,
+        KillzoneWindow, ImpactLevel, SwingPoint, SwingType.
+
+        WHY zero dependencies?
+        Every other module depends on this one. If core depended on
+        Spring Boot, every module would inherit Spring Boot whether
+        they needed it or not. Keeping core clean means it compiles
+        in milliseconds and can be tested without any infrastructure.
+    </description>
+
+    <!--
+        No <dependencies> section at all — this module uses nothing
+        except the JDK itself and the test libraries that come
+        automatically from the parent POM.
+    -->
+
+</project>
