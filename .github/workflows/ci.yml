@@ -1,0 +1,56 @@
+# The name shown in the GitHub Actions tab
+name: Aletheia CI
+
+# ── WHEN does this run? ──────────────────────────────────────────────
+# 'on' defines the trigger events.
+on:
+  push:
+    branches:
+      - main         # Every push to main
+      - develop      # Every push to develop
+      - "feature/*"  # Every push to any feature/ branch
+  pull_request:
+    branches:
+      - main         # Every PR targeting main
+
+# ── WHAT does it do? ─────────────────────────────────────────────────
+# 'jobs' defines units of work. Each job gets a fresh virtual machine.
+jobs:
+
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest  # Fresh Ubuntu VM from GitHub (free)
+
+    # ── STEPS run sequentially inside the job ────────────────────────
+    steps:
+
+      # Step 1: Download your repo code onto the runner
+      # Without this, the VM is empty — it has no idea what to build
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: Install Java 21 on the runner
+      # 'temurin' is Eclipse's free OpenJDK build — industry standard
+      # 'cache: maven' saves your .m2 folder between runs (faster CI)
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: "temurin"
+          cache: maven
+
+      # Step 3: Compile everything and run all tests
+      # This is the same command you run locally
+      - name: Build and run tests
+        run: ./mvnw clean verify
+
+      # Step 4: Save the test coverage report as a downloadable file
+      # 'if: always()' means: upload even if tests failed
+      # so you can see WHICH tests failed and what the coverage looks like
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jacoco-coverage-report
+          path: "**/target/site/jacoco/"
+          retention-days: 7
