@@ -153,6 +153,18 @@
                 <artifactId>micrometer-registry-prometheus</artifactId>
                 <version>${micrometer.version}</version>
             </dependency>
+            <!-- LZMA decompression for Dukascopy .bi5 files -->
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-compress</artifactId>
+                <version>1.26.1</version>
+            </dependency>
+            <!-- XZ/LZMA support — required by Commons Compress for .bi5 -->
+            <dependency>
+                <groupId>org.tukaani</groupId>
+                <artifactId>xz</artifactId>
+                <version>1.9</version>
+            </dependency>
 
         </dependencies>
     </dependencyManagement>
