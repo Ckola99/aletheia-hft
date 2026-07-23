@@ -1,0 +1,84 @@
+package com.aletheia.api;
+
+import com.aletheia.data.OandaPricingStream;
+import com.aletheia.data.TickRepository;
+
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.context.annotation.Profile;
+import org.springframework.stereotype.Component;
+
+import jakarta.annotation.PreDestroy;
+
+/**
+ * Starts the OANDA pricing stream when the application boots.
+ *
+ * WHAT IS CommandLineRunner?
+ * A Spring interface with one method: run().
+ * Spring calls run() automatically after the application context
+ * is fully initialised — all beans created, all wiring done.
+ * This is the right place to start the stream because everything
+ * is ready.
+ *
+ * WHAT IS @Profile("!test")?
+ * This means: "only create this bean when the 'test' profile is NOT active."
+ * During tests (mvnw test -Dspring.profiles.active=test), we do NOT want
+ * the stream to start and connect to OANDA. Tests should be fast and
+ * not depend on external services.
+ *
+ * WHAT IS @PreDestroy?
+ * Spring calls methods marked with @PreDestroy when the application
+ * is shutting down (Ctrl+C, or server stop). We use it to cleanly
+ * stop the stream and flush any remaining buffered ticks.
+ */
+@Component
+@Profile("!test")
+public class TradingEngineRunner implements CommandLineRunner {
+
+	private final OandaPricingStream pricingStream;
+	private final TickRepository tickRepository;
+
+	/**
+	 * Spring injects the beans we created in TradingEngineConfig.
+	 * This is CONSTRUCTOR INJECTION — the recommended way to inject
+	 * dependencies in Spring. The parameters match beans by type.
+	 */
+	public TradingEngineRunner(OandaPricingStream pricingStream,
+			TickRepository tickRepository) {
+		this.pricingStream = pricingStream;
+		this.tickRepository = tickRepository;
+	}
+
+	/**
+	 * Called automatically by Spring after startup.
+	 * Starts the OANDA pricing stream.
+	 */
+	@Override
+	public void run(String... args) {
+		System.out.println("═══════════════════════════════════════════════════");
+		System.out.println("  Aletheia Trading Engine Starting");
+		System.out.println("═══════════════════════════════════════════════════");
+
+		pricingStream.start();
+
+		System.out.println("  Stream started. Ticks are flowing.");
+		System.out.println("  Press Ctrl+C to stop.");
+		System.out.println("═══════════════════════════════════════════════════");
+	}
+
+	/**
+	 * Called automatically by Spring on shutdown (Ctrl+C).
+	 * Stops the stream and flushes any remaining ticks to the database.
+	 */
+	@PreDestroy
+	public void shutdown() {
+		System.out.println("\n[TradingEngineRunner] Shutting down...");
+
+		// Stop the stream first — no more ticks arrive
+		pricingStream.stop();
+
+		// Flush any remaining buffered ticks to the database
+		tickRepository.flush();
+
+		System.out.println("[TradingEngineRunner] Shutdown complete.");
+	}
+}
