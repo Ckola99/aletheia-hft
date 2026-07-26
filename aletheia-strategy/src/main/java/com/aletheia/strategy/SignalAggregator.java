@@ -119,6 +119,10 @@ public class SignalAggregator {
 		// ── ALL FIVE PILLARS PASSED ────────────────────────────────
 		JudasSwingSignal j = judas.get();
 
+		SignalGrade grade = ctx.smtSignal().isPresent()
+				? SignalGrade.A_PLUS
+				: SignalGrade.A;
+
 		TradeSignal signal = new TradeSignal(
 				pairBias,
 				ctx.instrument(),
@@ -126,9 +130,10 @@ public class SignalAggregator {
 				j.idealEntry(),
 				j.sweepPrice(),
 				ctx.killzone(),
-				j.grade(), // A for now — SMT upgrades to A+ in M3
+				grade,
 				ctx.usdxBias(),
 				j,
+				ctx.smtSignal(),
 				ctx.now());
 
 		logSignal(signal);
@@ -151,6 +156,9 @@ public class SignalAggregator {
 		System.out.println("  Sweep price: " + signal.sweepPrice());
 		System.out.println("  Killzone:    " + signal.killzone().displayName());
 		System.out.println("  Grade:       " + signal.grade());
+		System.out.println("  SMT:         " + (signal.isSmtConfirmed()
+				? "CONFIRMED (" + signal.smtSignal().get().type() + ")"
+				: "not present"));
 		System.out.println("  USDX:        " + signal.usdxBias().direction()
 				+ " (" + signal.usdxBias().confidence() + ")");
 		System.out.println("═══════════════════════════════════════════════════");

@@ -4,6 +4,7 @@ import com.aletheia.core.KillzoneWindow;
 import com.aletheia.core.MarketBias;
 
 import java.time.Instant;
+import java.util.Optional;
 
 /**
  * A fully validated trade signal — the output of SignalAggregator.
@@ -28,6 +29,7 @@ import java.time.Instant;
  * @param grade       A_PLUS (SMT confirmed) or A (standalone)
  * @param usdxBias    the full USDX analysis for logging/debugging
  * @param judasSignal the full Judas Swing signal for logging/debugging
+ * @param smtSignal   the SMT Divergence signal if present
  * @param generatedAt when this signal was generated
  */
 public record TradeSignal(
@@ -40,5 +42,13 @@ public record TradeSignal(
 		SignalGrade grade,
 		UsdxBias usdxBias,
 		JudasSwingSignal judasSignal,
+		Optional<SmtDivergenceSignal> smtSignal,
 		Instant generatedAt) {
+
+	/**
+	 * Returns true if this signal was confirmed by SMT Divergence.
+	 */
+	public boolean isSmtConfirmed() {
+		return grade == SignalGrade.A_PLUS && smtSignal.isPresent();
+	}
 }

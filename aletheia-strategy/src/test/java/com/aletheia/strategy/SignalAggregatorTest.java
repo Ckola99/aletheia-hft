@@ -276,4 +276,58 @@ class SignalAggregatorTest {
 		assertThat(s.entryZone().bias()).isEqualTo(PdArray.Bias.BULLISH);
 		assertThat(s.entryZone().upper()).isGreaterThan(s.entryZone().lower());
 	}
+
+	// ── SMT INTEGRATION ─────────────────────────────────────────────
+
+	@Test
+	void signal_grade_is_A_without_smt() {
+		MarketContext ctx = passingContext();
+
+		TradeSignal s = aggregator.evaluate(ctx).get();
+
+		// No SMT signal in context → grade should be A
+		assertThat(s.grade()).isEqualTo(SignalGrade.A);
+		assertThat(s.isSmtConfirmed()).isFalse();
+		assertThat(s.smtSignal()).isEmpty();
+	}
+
+	@Test
+	void signal_grade_upgrades_to_A_PLUS_with_smt() {
+		// Create an SMT divergence signal
+		SmtDivergenceSignal smt = new SmtDivergenceSignal(
+				SmtType.BULLISH,
+				SmtPair.EUR_GBP,
+				com.aletheia.core.Timeframe.MIN_15,
+				new com.aletheia.core.SwingPoint(
+						Instant.now(), "GBP_USD",
+						com.aletheia.core.SwingType.LOW, 133_050L,
+						com.aletheia.core.Timeframe.MIN_15),
+				new com.aletheia.core.SwingPoint(
+						Instant.now(), "EUR_USD",
+						com.aletheia.core.SwingType.LOW, 108_150L,
+						com.aletheia.core.Timeframe.MIN_15),
+				KillzoneWindow.LONDON_OPEN);
+
+		// Build context WITH the SMT signal
+		MarketContext ctx = new MarketContext(
+				Instant.now(),
+				"EUR_USD",
+				KillzoneWindow.LONDON_OPEN,
+				bullishPairBias(),
+				htfCandlesWithBullishFvg(),
+				ltfCandlesWithBullishJudas(),
+				false,
+				Optional.of(smt) // ← SMT present!
+		);
+
+		Optional<TradeSignal> signal = aggregator.evaluate(ctx);
+
+		assertThat(signal).isPresent();
+
+		TradeSignal s = signal.get();
+		assertThat(s.grade()).isEqualTo(SignalGrade.A_PLUS);
+		assertThat(s.isSmtConfirmed()).isTrue();
+		assertThat(s.smtSignal()).isPresent();
+		assertThat(s.smtSignal().get().type()).isEqualTo(SmtType.BULLISH);
+	}
 }
