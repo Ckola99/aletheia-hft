@@ -29,6 +29,13 @@ public class OrderManager {
 	private final double tp2RiskMultiple; // e.g. 3.0 means TP2 at 3R
 	private final long slBufferScaled;
 
+	// Prevent duplicate trades from the same setup
+	private long lastSignalEntryPrice = 0;
+	private long lastSignalSweepPrice = 0;
+	private java.time.Instant lastSignalTime = null;
+	private static final long DUPLICATE_PRICE_THRESHOLD = 50L; // 5 pips
+	private static final java.time.Duration DUPLICATE_TIME_THRESHOLD = java.time.Duration.ofMinutes(30);
+
 	private final List<ManagedOrder> allOrders = new ArrayList<>();
 
 	/**
@@ -65,6 +72,12 @@ public class OrderManager {
 		if (openPositionCount() >= maxOpenPositions) {
 			System.out.println("[OrderManager] Max positions reached ("
 					+ maxOpenPositions + "). Skipping signal.");
+			return Optional.empty();
+		}
+
+		if (isDuplicateSignal(signal)) {
+			System.out.println("[OrderManager] Duplicate signal rejected -- "
+					+ "same setup already traded recently");
 			return Optional.empty();
 		}
 
@@ -108,6 +121,11 @@ public class OrderManager {
 		System.out.println("  TP2:       " + tp2 + " (" + tp2RiskMultiple + "R)");
 		System.out.println("  Units:     " + units);
 		System.out.println("  Grade:     " + order.grade());
+
+		// Record this signal for duplicate detection
+		lastSignalEntryPrice = signal.idealEntry();
+		lastSignalSweepPrice = signal.sweepPrice();
+		lastSignalTime = signal.generatedAt();
 
 		return Optional.of(order);
 	}
@@ -160,5 +178,36 @@ public class OrderManager {
 		return allOrders.stream()
 				.filter(o -> tradeId.equals(o.oandaTradeId()))
 				.findFirst();
+	}
+
+	/**
+	 * Checks if this signal is a duplicate of a recently traded setup.
+	 *
+	 * A signal is considered duplicate if:
+	 * - The entry price is within 5 pips of the last signal
+	 * - The sweep price is within 5 pips of the last signal
+	 * - Less than 30 minutes have passed since the last signal
+	 *
+	 * This prevents the exact bug you saw in backtesting: the same
+	 * FVG + sweep pattern firing on every candle and opening
+	 * identical positions repeatedly.
+	 */
+	private boolean isDuplicateSignal(TradeSignal signal) {
+		if (lastSignalTime == null)
+			return false;
+
+		// Check time proximity
+		java.time.Duration timeSince = java.time.Duration.between(
+				lastSignalTime, signal.generatedAt());
+		if (timeSince.compareTo(DUPLICATE_TIME_THRESHOLD) > 0) {
+			return false; // enough time has passed — this is a new setup
+		}
+
+		// Check price proximity
+		long entryDiff = Math.abs(signal.idealEntry() - lastSignalEntryPrice);
+		long sweepDiff = Math.abs(signal.sweepPrice() - lastSignalSweepPrice);
+
+		return entryDiff < DUPLICATE_PRICE_THRESHOLD
+				&& sweepDiff < DUPLICATE_PRICE_THRESHOLD;
 	}
 }
