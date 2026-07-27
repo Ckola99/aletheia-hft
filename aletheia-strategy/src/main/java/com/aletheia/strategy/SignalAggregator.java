@@ -59,7 +59,7 @@ public class SignalAggregator {
 
 		// ── PILLAR 1: USDX Bias ────────────────────────────────────
 		if (!ctx.usdxBias().isTradeable()) {
-			logRejection(ctx, "Pillar 1 FAIL: USDX bias not tradeable — "
+			logRejection(ctx, "Pillar 1 FAIL: USDX bias not tradeable ---"
 					+ ctx.usdxBias().direction() + " / " + ctx.usdxBias().confidence());
 			return Optional.empty();
 		}
@@ -73,7 +73,7 @@ public class SignalAggregator {
 
 		// ── PILLAR 2: Killzone ─────────────────────────────────────
 		if (!ctx.killzone().isActive()) {
-			logRejection(ctx, "Pillar 2 FAIL: outside killzone — "
+			logRejection(ctx, "Pillar 2 FAIL: outside killzone ---"
 					+ ctx.killzone().displayName());
 			return Optional.empty();
 		}
@@ -146,7 +146,7 @@ public class SignalAggregator {
 	}
 
 	private void logSignal(TradeSignal signal) {
-		System.out.println("═══════════════════════════════════════════════════");
+		System.out.println("=====================================================");
 		System.out.println("  ✅ TRADE SIGNAL GENERATED");
 		System.out.println("  Instrument:  " + signal.instrument());
 		System.out.println("  Direction:   " + signal.bias());
@@ -161,6 +161,6 @@ public class SignalAggregator {
 				: "not present"));
 		System.out.println("  USDX:        " + signal.usdxBias().direction()
 				+ " (" + signal.usdxBias().confidence() + ")");
-		System.out.println("═══════════════════════════════════════════════════");
+		System.out.println("======================================================");
 	}
 }

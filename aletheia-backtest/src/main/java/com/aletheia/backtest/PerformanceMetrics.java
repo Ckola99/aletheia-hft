@@ -206,9 +206,9 @@ public class PerformanceMetrics {
 	 * Prints a formatted summary report to stdout.
 	 */
 	public void printReport() {
-		System.out.println("═══════════════════════════════════════════════════");
+		System.out.println("===================================================");
 		System.out.println("  BACKTEST PERFORMANCE REPORT");
-		System.out.println("═══════════════════════════════════════════════════");
+		System.out.println("===================================================");
 		System.out.printf("  Total Trades:     %d (%d wins, %d losses)%n",
 				totalTrades(), wins(), losses());
 		System.out.printf("  Win Rate:         %.1f%%%n", winRate());
@@ -219,13 +219,13 @@ public class PerformanceMetrics {
 		System.out.printf("  Max Drawdown:     %.1f pips%n", maxDrawdownPips());
 		System.out.printf("  Sharpe Ratio:     %.2f%n", sharpeRatio());
 		System.out.printf("  Avg Winner R:R:   %.2f%n", averageWinRR());
-		System.out.println("───────────────────────────────────────────────────");
+		System.out.println("---------------------------------------------------");
 		System.out.printf("  A+ Win Rate:      %.1f%% (%d trades)%n",
 				winRateAPlus(),
 				trades.stream().filter(t -> t.grade() == SignalGrade.A_PLUS).count());
 		System.out.printf("  A  Win Rate:      %.1f%% (%d trades)%n",
 				winRateA(),
 				trades.stream().filter(t -> t.grade() == SignalGrade.A).count());
-		System.out.println("═══════════════════════════════════════════════════");
+		System.out.println("===================================================");
 	}
 }

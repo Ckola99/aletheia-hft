@@ -1,0 +1,16 @@
+date,time,currency,impact,event
+2023-06-01,08:15,USD,HIGH,ADP Non-Farm Employment Change
+2023-06-01,10:00,USD,HIGH,ISM Manufacturing PMI
+2023-06-02,08:30,USD,HIGH,Non-Farm Payrolls
+2023-06-02,08:30,USD,HIGH,Unemployment Rate
+2023-06-06,10:00,USD,HIGH,ISM Non-Manufacturing PMI
+2023-06-13,08:30,USD,HIGH,CPI m/m
+2023-06-13,08:30,USD,HIGH,Core CPI m/m
+2023-06-14,14:00,USD,HIGH,FOMC Statement
+2023-06-14,14:00,USD,HIGH,Federal Funds Rate
+2023-06-15,08:30,USD,HIGH,Unemployment Claims
+2023-06-15,08:30,USD,HIGH,Retail Sales m/m
+2023-06-22,07:00,GBP,HIGH,BOE Rate Decision
+2023-06-27,10:00,USD,HIGH,CB Consumer Confidence
+2023-06-29,08:30,USD,HIGH,Final GDP q/q
+2023-06-30,08:30,USD,HIGH,Core PCE Price Index m/m

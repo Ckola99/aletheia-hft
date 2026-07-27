@@ -75,6 +75,15 @@ public class HistoricalCandleBuilder {
 	}
 
 	/**
+	 * Processes a single tick through the aggregator.
+	 * Used when streaming ticks directly from the downloader
+	 * to avoid holding all ticks in memory simultaneously.
+	 */
+	public void processOneTick(Tick tick) {
+		aggregator.onTick(tick);
+	}
+
+	/**
 	 * Returns all closed candles for the given timeframe,
 	 * sorted in chronological order.
 	 */
@@ -110,4 +119,6 @@ public class HistoricalCandleBuilder {
 	public int totalCandles() {
 		return closedCandles.size();
 	}
+
+
 }

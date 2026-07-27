@@ -25,7 +25,7 @@ import static org.assertj.core.api.Assertions.*;
 class BacktestEngineTest {
 
 	// R:R 2.0, 20-unit SL buffer, max 2 open trades
-	private final BacktestEngine engine = new BacktestEngine(2.0, 20L, 2);
+	private final BacktestEngine engine = new BacktestEngine(2.0, 20L, 2, 0L);
 
 	/**
 	 * Creates a time during London Open killzone.

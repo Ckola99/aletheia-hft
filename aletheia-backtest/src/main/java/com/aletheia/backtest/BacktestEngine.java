@@ -13,27 +13,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Event-driven backtesting engine.
- *
- * DESIGN PRINCIPLE — The strategy doesn't know it's in a backtest.
- * The same SignalAggregator, the same detectors, the same logic.
- * The only difference: candles come from a historical list instead of
- * a live stream, and trades are simulated instead of sent to OANDA.
- *
- * HOW IT WORKS:
- * 1. Load HTF candles (MIN_15) for the instrument
- * 2. Load LTF candles (MIN_1 or SECONDS_5) for the instrument
- * 3. Optionally load USDX candles (Monthly/Weekly/Daily) for dynamic bias
- * 4. Walk forward through LTF candles one at a time
- * 5. At each step, build a MarketContext from the data seen SO FAR
- * 6. Call SignalAggregator.evaluate(context)
- * 7. If signal → open a simulated trade
- * 8. Check all open trades against current candle's high/low
- * 9. After all candles processed → calculate metrics
- *
- * LOOK-AHEAD BIAS PREVENTION:
- * At candle index i, the strategy only sees candles [0..i].
- * It never sees candle [i+1] or later.
+ * Event-driven backtesting engine with spread simulation and SMT support.
  */
 public class BacktestEngine {
 
@@ -42,12 +22,21 @@ public class BacktestEngine {
 	private final EconomicCalendarService calendarService;
 	private final UsdxBiasEngine usdxBiasEngine;
 
-	// Risk parameters
 	private final double riskRewardRatio;
 	private final long slBufferScaled;
 	private final int maxOpenTrades;
+	private final long spreadScaled;
 
-	public BacktestEngine(double riskRewardRatio, long slBufferScaled, int maxOpenTrades) {
+	/**
+	 * @param riskRewardRatio target R:R (e.g. 3.0)
+	 * @param slBufferScaled  extra buffer beyond sweep price for SL
+	 * @param maxOpenTrades   max simultaneous positions
+	 * @param spreadScaled    simulated spread in scaled units
+	 *                        EUR/USD typical spread = 1.5 pips = 15 scaled units
+	 *                        Use 0 in unit tests to test mechanics without spread
+	 */
+	public BacktestEngine(double riskRewardRatio, long slBufferScaled,
+			int maxOpenTrades, long spreadScaled) {
 		this.aggregator = new SignalAggregator(
 				new FairValueGapDetector(),
 				new OrderBlockDetector(5, 1.5),
@@ -58,6 +47,7 @@ public class BacktestEngine {
 		this.riskRewardRatio = riskRewardRatio;
 		this.slBufferScaled = slBufferScaled;
 		this.maxOpenTrades = maxOpenTrades;
+		this.spreadScaled = spreadScaled;
 	}
 
 	public EconomicCalendarService calendarService() {
@@ -65,29 +55,18 @@ public class BacktestEngine {
 	}
 
 	/**
-	 * Runs the backtest with a PRECOMPUTED USDX bias.
-	 * Used in tests where you want to control the bias directly.
+	 * Run with PRECOMPUTED USDX bias, no SMT. Used in unit tests.
 	 */
 	public BacktestResult run(String instrument,
 			List<Candle> htfCandles,
 			List<Candle> ltfCandles,
 			UsdxBias usdxBias) {
 		return runInternal(instrument, htfCandles, ltfCandles,
-				null, null, null, usdxBias);
+				null, null, null, usdxBias, Optional.empty());
 	}
 
 	/**
-	 * Runs the backtest with DYNAMIC USDX bias computation.
-	 * This is the real backtest — bias is recalculated as the
-	 * simulation walks forward through time.
-	 *
-	 * @param instrument  which pair to backtest e.g. "EUR_USD"
-	 * @param htfCandles  HTF candles (MIN_15) for PD array detection
-	 * @param ltfCandles  LTF candles for Judas Swing detection
-	 * @param usdxMonthly USDX Monthly candles for bias computation
-	 * @param usdxWeekly  USDX Weekly candles for bias computation
-	 * @param usdxDaily   USDX Daily candles for bias computation
-	 * @return backtest result with all trades and metrics
+	 * Run with DYNAMIC USDX bias, no SMT.
 	 */
 	public BacktestResult run(String instrument,
 			List<Candle> htfCandles,
@@ -96,7 +75,21 @@ public class BacktestEngine {
 			List<Candle> usdxWeekly,
 			List<Candle> usdxDaily) {
 		return runInternal(instrument, htfCandles, ltfCandles,
-				usdxMonthly, usdxWeekly, usdxDaily, null);
+				usdxMonthly, usdxWeekly, usdxDaily, null, Optional.empty());
+	}
+
+	/**
+	 * Run with DYNAMIC USDX bias AND SMT divergence signal.
+	 */
+	public BacktestResult run(String instrument,
+			List<Candle> htfCandles,
+			List<Candle> ltfCandles,
+			List<Candle> usdxMonthly,
+			List<Candle> usdxWeekly,
+			List<Candle> usdxDaily,
+			Optional<SmtDivergenceSignal> smtSignal) {
+		return runInternal(instrument, htfCandles, ltfCandles,
+				usdxMonthly, usdxWeekly, usdxDaily, null, smtSignal);
 	}
 
 	private BacktestResult runInternal(String instrument,
@@ -105,26 +98,33 @@ public class BacktestEngine {
 			List<Candle> usdxMonthly,
 			List<Candle> usdxWeekly,
 			List<Candle> usdxDaily,
-			UsdxBias fixedBias) {
+			UsdxBias fixedBias,
+			Optional<SmtDivergenceSignal> smtSignal) {
 
 		boolean dynamicBias = (fixedBias == null);
+		Optional<SmtDivergenceSignal> smt = (smtSignal != null) ? smtSignal : Optional.empty();
 
 		List<SimulatedTrade> allTrades = new ArrayList<>();
 		List<SimulatedTrade> openTrades = new ArrayList<>();
 		int signalsGenerated = 0;
 		int signalsRejected = 0;
 
-		System.out.println("═══════════════════════════════════════════════════");
+		System.out.println("=====================================================");
 		System.out.println("  BACKTEST STARTING");
 		System.out.println("  Instrument:    " + instrument);
 		System.out.println("  HTF candles:   " + htfCandles.size());
 		System.out.println("  LTF candles:   " + ltfCandles.size());
 		System.out.println("  USDX bias:     " + (dynamicBias ? "DYNAMIC" : "FIXED " + fixedBias.direction()));
 		System.out.println("  R:R target:    " + riskRewardRatio);
+		System.out.println("  Spread:        " + spreadScaled + " scaled units ("
+				+ (spreadScaled / 10.0) + " pips)");
+		System.out.println("  SMT signal:    " + (smt.isPresent() ? smt.get().type() : "none"));
 		System.out.println("  Max positions: " + maxOpenTrades);
-		System.out.println("═══════════════════════════════════════════════════");
+		System.out.println("=====================================================");
 
 		int warmupPeriod = 30;
+		int cooldownBars = 0; // bars remaining before next trade allowed
+		int cooldownPeriod = 30; // wait 30 LTF candles after opening a trade
 
 		for (int i = warmupPeriod; i < ltfCandles.size(); i++) {
 			Candle currentCandle = ltfCandles.get(i);
@@ -142,6 +142,12 @@ public class BacktestEngine {
 			if (openTrades.size() >= maxOpenTrades)
 				continue;
 
+			// Cooldown: skip signal evaluation after recently opening a trade
+			if (cooldownBars > 0) {
+				cooldownBars--;
+				continue;
+			}
+
 			// HTF candles up to current time (no look-ahead)
 			List<Candle> visibleHtf = htfCandles.stream()
 					.filter(c -> !c.time().isAfter(currentCandle.time()))
@@ -153,20 +159,16 @@ public class BacktestEngine {
 			int ltfStart = Math.max(0, i - 50);
 			List<Candle> visibleLtf = ltfCandles.subList(ltfStart, i + 1);
 
-			// ── Compute USDX bias ────────────────────────────────────
+			// Compute USDX bias
 			UsdxBias currentBias;
 			if (dynamicBias) {
-				// Filter each USDX timeframe to only include candles
-				// that existed at this point in time (no look-ahead)
 				Instant now = currentCandle.time();
-
 				List<Candle> visibleMonthly = usdxMonthly.stream()
 						.filter(c -> !c.time().isAfter(now)).toList();
 				List<Candle> visibleWeekly = usdxWeekly.stream()
 						.filter(c -> !c.time().isAfter(now)).toList();
 				List<Candle> visibleDaily = usdxDaily.stream()
 						.filter(c -> !c.time().isAfter(now)).toList();
-
 				currentBias = usdxBiasEngine.compute(
 						visibleMonthly, visibleWeekly, visibleDaily);
 			} else {
@@ -177,6 +179,7 @@ public class BacktestEngine {
 			boolean newsBlackout = calendarService.isNewsBlackout(
 					currentCandle.time(), instrument);
 
+			// Build context WITH SMT signal
 			MarketContext ctx = new MarketContext(
 					currentCandle.time(),
 					instrument,
@@ -184,7 +187,8 @@ public class BacktestEngine {
 					currentBias,
 					visibleHtf,
 					visibleLtf,
-					newsBlackout);
+					newsBlackout,
+					smt);
 
 			Optional<TradeSignal> signal = aggregator.evaluate(ctx);
 
@@ -196,20 +200,28 @@ public class BacktestEngine {
 			TradeSignal s = signal.get();
 			signalsGenerated++;
 
+			// Calculate SL and TP with spread applied
 			long sl, tp;
 			if (s.bias() == MarketBias.BULLISH) {
+				// Long: enter at ask (ideal entry + half spread)
+				long effectiveEntry = s.idealEntry() + (spreadScaled / 2);
 				sl = s.sweepPrice() - slBufferScaled;
-				long risk = s.idealEntry() - sl;
-				tp = s.idealEntry() + (long) (risk * riskRewardRatio);
+				long risk = effectiveEntry - sl;
+				tp = effectiveEntry + (long) (risk * riskRewardRatio);
 			} else {
+				// Short: enter at bid (ideal entry - half spread)
+				long effectiveEntry = s.idealEntry() - (spreadScaled / 2);
 				sl = s.sweepPrice() + slBufferScaled;
-				long risk = sl - s.idealEntry();
-				tp = s.idealEntry() - (long) (risk * riskRewardRatio);
+				long risk = sl - effectiveEntry;
+				tp = effectiveEntry - (long) (risk * riskRewardRatio);
 			}
 
 			SimulatedTrade trade = new SimulatedTrade(s, sl, tp);
 			openTrades.add(trade);
 			allTrades.add(trade);
+
+			// Start cooldown — don't open another trade for 50 candles
+			cooldownBars = cooldownPeriod;
 		}
 
 		// Force-close remaining open trades

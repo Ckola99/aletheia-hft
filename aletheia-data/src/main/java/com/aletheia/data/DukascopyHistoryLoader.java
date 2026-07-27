@@ -77,11 +77,11 @@ public class DukascopyHistoryLoader {
 		String symbol = Bi5TickParser.toDukascopySymbol(instrument);
 		// "EUR_USD" → "EURUSD"
 
-		System.out.println("════════════════════════════════════════════════════════");
+		System.out.println("========================================================");
 		System.out.println("  Dukascopy Historical Data Loader");
 		System.out.println("  Instrument: " + instrument + " (" + symbol + ")");
 		System.out.println("  Range: " + startDate + " to " + endDate);
-		System.out.println("════════════════════════════════════════════════════════");
+		System.out.println("========================================================");
 
 		// Loop through every day in the range
 		LocalDate current = startDate;
@@ -133,12 +133,12 @@ public class DukascopyHistoryLoader {
 		// Final flush to make sure nothing is left in the buffer
 		tickRepository.flush();
 
-		System.out.println("════════════════════════════════════════════════════════");
+		System.out.println("========================================================");
 		System.out.println("  Complete!");
 		System.out.println("  Files downloaded: " + filesDownloaded);
 		System.out.println("  Files skipped:    " + filesFailed);
 		System.out.println("  Total ticks:      " + totalTicksLoaded);
-		System.out.println("════════════════════════════════════════════════════════");
+		System.out.println("=========================================================");
 	}
 
 	/**

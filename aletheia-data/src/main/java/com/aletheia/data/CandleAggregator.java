@@ -59,6 +59,9 @@ public class CandleAggregator implements TickListener {
 			Timeframe.DAILY,
 	};
 
+	// Cached ZoneId to avoid creating new objects on every tick
+	private static final java.time.ZoneId UTC = java.time.ZoneId.of("UTC");
+
 	/**
 	 * The key for looking up an open candle.
 	 * Each unique (instrument + timeframe) has exactly one open candle.
@@ -68,7 +71,7 @@ public class CandleAggregator implements TickListener {
 	 * "GBP_USD:HOUR_1"
 	 * "EUR_USD:SECONDS_5"
 	 */
-	
+
 	private record CandleKey(String instrument, Timeframe timeframe) {}
 
 	/**
@@ -227,13 +230,13 @@ public class CandleAggregator implements TickListener {
 	static Instant calculatePeriodStart(Instant time, Timeframe tf) {
 		if (tf == Timeframe.DAILY) {
 			// Daily candles align to midnight UTC
-			ZonedDateTime zdt = time.atZone(ZoneId.of("UTC"));
-			return zdt.toLocalDate().atStartOfDay(ZoneId.of("UTC")).toInstant();
+			ZonedDateTime zdt = time.atZone(UTC);
+			return zdt.toLocalDate().atStartOfDay(UTC).toInstant();
 		}
 
 		if (tf == Timeframe.HOUR_4) {
 			// 4-hour candles align to 00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC
-			ZonedDateTime zdt = time.atZone(ZoneId.of("UTC"));
+			ZonedDateTime zdt = time.atZone(UTC);
 			int hour = zdt.getHour();
 			int alignedHour = (hour / 4) * 4; // e.g. hour 9 → 8, hour 15 → 12
 			return zdt.withHour(alignedHour).withMinute(0).withSecond(0).withNano(0).toInstant();
