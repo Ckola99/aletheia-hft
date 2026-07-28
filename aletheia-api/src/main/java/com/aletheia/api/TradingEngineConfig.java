@@ -1,10 +1,24 @@
 package com.aletheia.api;
 
+import com.aletheia.calendar.EconomicCalendarService;
 import com.aletheia.data.CandleAggregator;
 import com.aletheia.data.CandleRepository;
 import com.aletheia.data.OandaConfig;
 import com.aletheia.data.OandaPricingStream;
 import com.aletheia.data.TickRepository;
+import com.aletheia.execution.KillSwitch;
+import com.aletheia.execution.OandaOrderExecutor;
+import com.aletheia.execution.OrderExpiryService;
+import com.aletheia.execution.OrderManager;
+import com.aletheia.execution.RiskManager;
+import com.aletheia.strategy.FairValueGapDetector;
+import com.aletheia.strategy.JudasSwingDetector;
+import com.aletheia.strategy.KillzoneService;
+import com.aletheia.strategy.OrderBlockDetector;
+import com.aletheia.strategy.SignalAggregator;
+import com.aletheia.strategy.SmtDivergenceDetector;
+import com.aletheia.strategy.SwingPointRegistry;
+import com.aletheia.strategy.UsdxBiasEngine;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -81,6 +95,99 @@ public class TradingEngineConfig {
 	@Bean
 	public CandleRepository candleRepository(JdbcTemplate jdbcTemplate) {
 		return new CandleRepository(jdbcTemplate);
+	}
+
+	@Bean
+	public FairValueGapDetector fvgDetector() {
+		return new FairValueGapDetector();
+	}
+
+	@Bean
+	public OrderBlockDetector orderBlockDetector(
+			@Value("${trading.ob-atr-period:14}") int atrPeriod,
+			@Value("${trading.ob-displacement:2.0}") double displacement) {
+		return new OrderBlockDetector(atrPeriod, displacement);
+	}
+
+	@Bean
+	public JudasSwingDetector judasSwingDetector(
+			@Value("${trading.judas-lookback:3}") int lookback,
+			@Value("${trading.judas-atr-period:20}") int atrPeriod,
+			@Value("${trading.judas-displacement:2.5}") double displacement) {
+		return new JudasSwingDetector(lookback, atrPeriod, displacement);
+	}
+
+	@Bean
+	public SignalAggregator signalAggregator(
+			FairValueGapDetector fvgDetector,
+			OrderBlockDetector obDetector,
+			JudasSwingDetector judasDetector) {
+		return new SignalAggregator(fvgDetector, obDetector, judasDetector);
+	}
+
+	@Bean
+	public KillzoneService killzoneService() {
+		return new KillzoneService();
+	}
+
+	@Bean
+	public EconomicCalendarService economicCalendarService() {
+		return new EconomicCalendarService();
+	}
+
+	@Bean
+	public UsdxBiasEngine usdxBiasEngine() {
+		return new UsdxBiasEngine(3);
+	}
+
+	@Bean
+	public SwingPointRegistry swingPointRegistry() {
+		return new SwingPointRegistry(3, 50);
+	}
+
+	@Bean
+	public SmtDivergenceDetector smtDivergenceDetector() {
+		return new SmtDivergenceDetector();
+	}
+
+	// ── Execution Layer Beans ────────────────────────────────────────
+
+	@Bean
+	public RiskManager riskManager(
+			@Value("${trading.risk-percentage:0.01}") double riskPct) {
+		return new RiskManager(riskPct);
+	}
+
+	@Bean
+	public OrderManager orderManager(
+			RiskManager riskManager,
+			@Value("${trading.max-open-positions:4}") int maxPositions,
+			@Value("${trading.tp1-multiple:2.0}") double tp1,
+			@Value("${trading.tp2-multiple:3.0}") double tp2,
+			@Value("${trading.sl-buffer:20}") long slBuffer) {
+		return new OrderManager(riskManager, maxPositions, tp1, tp2, slBuffer);
+	}
+
+	@Bean
+	public OandaOrderExecutor oandaOrderExecutor(
+			@Value("${oanda.api-key}") String apiKey,
+			@Value("${oanda.account-id}") String accountId,
+			@Value("${oanda.base-url}") String baseUrl) {
+		return new OandaOrderExecutor(apiKey, accountId, baseUrl);
+	}
+
+	@Bean
+	public KillSwitch killSwitch(OrderManager orderManager,
+			OandaOrderExecutor executor) {
+		return new KillSwitch(orderManager, executor);
+	}
+
+	@Bean
+	public OrderExpiryService orderExpiryService(
+			OrderManager orderManager,
+			OandaOrderExecutor executor,
+			KillzoneService killzoneService) {
+		return new OrderExpiryService(orderManager, executor, killzoneService);
 	}
 
 	/**

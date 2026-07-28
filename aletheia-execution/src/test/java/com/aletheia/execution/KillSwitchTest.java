@@ -19,8 +19,8 @@ class KillSwitchTest {
 
 	private TradeSignal buildSignal() {
 		signalCounter++;
-		long entryBase = 108_200L + (signalCounter * 100);
-		long sweepBase = 107_950L + (signalCounter * 100);
+		long entryBase = 108_200L + (signalCounter * 200);
+		long sweepBase = 107_950L + (signalCounter * 200);
 
 		return new TradeSignal(
 				MarketBias.BULLISH, "EUR_USD",

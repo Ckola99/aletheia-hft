@@ -23,8 +23,8 @@ class OrderManagerTest {
 
 	private TradeSignal buildSignal(MarketBias bias) {
 		signalCounter++;
-		long entryBase = 108_200L + (signalCounter * 100);
-		long sweepBase = 107_950L + (signalCounter * 100);
+		long entryBase = 108_200L + (signalCounter * 200);
+		long sweepBase = 107_950L + (signalCounter * 200);
 
 		return new TradeSignal(
 				bias, "EUR_USD",

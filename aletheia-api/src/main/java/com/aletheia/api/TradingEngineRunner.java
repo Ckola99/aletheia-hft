@@ -2,11 +2,15 @@ package com.aletheia.api;
 
 import com.aletheia.data.OandaPricingStream;
 import com.aletheia.data.TickRepository;
+import com.aletheia.execution.KillSwitch;
+import com.aletheia.execution.OrderExpiryService;
+
+import java.time.Instant;
 
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Profile;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-
 import jakarta.annotation.PreDestroy;
 
 /**
@@ -36,6 +40,8 @@ public class TradingEngineRunner implements CommandLineRunner {
 
 	private final OandaPricingStream pricingStream;
 	private final TickRepository tickRepository;
+	private final OrderExpiryService orderExpiryService;
+	private final KillSwitch killSwitch;
 
 	/**
 	 * Spring injects the beans we created in TradingEngineConfig.
@@ -43,9 +49,13 @@ public class TradingEngineRunner implements CommandLineRunner {
 	 * dependencies in Spring. The parameters match beans by type.
 	 */
 	public TradingEngineRunner(OandaPricingStream pricingStream,
-			TickRepository tickRepository) {
+			TickRepository tickRepository,
+			OrderExpiryService orderExpiryService,
+			KillSwitch killSwitch) {
 		this.pricingStream = pricingStream;
 		this.tickRepository = tickRepository;
+		this.orderExpiryService = orderExpiryService;
+		this.killSwitch = killSwitch;
 	}
 
 	/**
@@ -54,15 +64,26 @@ public class TradingEngineRunner implements CommandLineRunner {
 	 */
 	@Override
 	public void run(String... args) {
-		System.out.println("═══════════════════════════════════════════════════");
+		System.out.println("===================================================");
 		System.out.println("  Aletheia Trading Engine Starting");
-		System.out.println("═══════════════════════════════════════════════════");
+		System.out.println("===================================================");
 
 		pricingStream.start();
 
 		System.out.println("  Stream started. Ticks are flowing.");
 		System.out.println("  Press Ctrl+C to stop.");
-		System.out.println("═══════════════════════════════════════════════════");
+		System.out.println("==================================================");
+	}
+
+	/**
+	 * Checks for expired pending orders every 60 seconds.
+	 * Orders placed during a killzone that has ended are cancelled.
+	 */
+	@Scheduled(fixedDelayString = "${trading.order-expiry-check-seconds:60}000")
+	public void checkOrderExpiry() {
+		if (!killSwitch.isActive()) {
+			orderExpiryService.checkAndExpire(Instant.now());
+		}
 	}
 
 	/**

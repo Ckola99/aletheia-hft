@@ -1,0 +1,64 @@
+# ================================================================
+# Aletheia Trading Engine — Production Dockerfile
+# Multi-stage build: compile with JDK, run with JRE
+# ================================================================
+
+# ── Stage 1: Build ───────────────────────────────────────────────
+FROM eclipse-temurin:21-jdk AS build
+
+WORKDIR /app
+
+# Copy Maven wrapper and POM files first (cached layer)
+COPY mvnw .
+COPY .mvn .mvn
+COPY pom.xml .
+COPY aletheia-core/pom.xml aletheia-core/
+COPY aletheia-data/pom.xml aletheia-data/
+COPY aletheia-strategy/pom.xml aletheia-strategy/
+COPY aletheia-calendar/pom.xml aletheia-calendar/
+COPY aletheia-execution/pom.xml aletheia-execution/
+COPY aletheia-backtest/pom.xml aletheia-backtest/
+COPY aletheia-observability/pom.xml aletheia-observability/
+COPY aletheia-api/pom.xml aletheia-api/
+
+# Download dependencies (cached unless POMs change)
+RUN chmod +x mvnw && ./mvnw dependency:go-offline -B
+
+# Copy source code
+COPY aletheia-core/src aletheia-core/src
+COPY aletheia-data/src aletheia-data/src
+COPY aletheia-strategy/src aletheia-strategy/src
+COPY aletheia-calendar/src aletheia-calendar/src
+COPY aletheia-execution/src aletheia-execution/src
+COPY aletheia-backtest/src aletheia-backtest/src
+COPY aletheia-api/src aletheia-api/src
+
+# Build the application
+RUN ./mvnw clean package -DskipTests -B
+
+# ── Stage 2: Run ─────────────────────────────────────────────────
+FROM eclipse-temurin:21-jre
+
+# Non-root user for security
+RUN groupadd -r aletheia && useradd -r -g aletheia aletheia
+
+WORKDIR /app
+
+# Copy the built jar from the build stage
+COPY --from=build /app/aletheia-api/target/aletheia-api-*.jar app.jar
+
+# Use the non-root user
+USER aletheia
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# JVM settings for production
+# -XX:+UseZGC: low-latency garbage collector (best for trading)
+# -Xmx512m: max heap (adjust based on your server)
+ENV JAVA_OPTS="-XX:+UseZGC -Xmx512m"
+
+EXPOSE 8080
+
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
