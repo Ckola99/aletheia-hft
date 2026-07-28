@@ -65,8 +65,8 @@ public class BacktestRunner {
 
 		primaryBuilder.summary().forEach((tf, count) -> System.out.println("  " + tf + ": " + count));
 
-		List<Candle> htfCandles = primaryBuilder.getCandles(instrument, Timeframe.MIN_15);
-		List<Candle> ltfCandles = primaryBuilder.getCandles(instrument, Timeframe.MIN_1);
+		List<Candle> htfCandles = primaryBuilder.getCandles(instrument, Timeframe.HOUR_1);
+		List<Candle> ltfCandles = primaryBuilder.getCandles(instrument, Timeframe.MIN_5);
 
 		System.out.println("  HTF (MIN_15): " + htfCandles.size() + " candles");
 		System.out.println("  LTF (MIN_1):  " + ltfCandles.size() + " candles");
@@ -87,19 +87,46 @@ public class BacktestRunner {
 			System.out.println("\n-- Step 2: SMT disabled ---------------------------------");
 		}
 
-		// -- Step 3: Build synthetic USDX -------------------------------
-		System.out.println("\n-- Step 3: Building synthetic USDX ----------------------");
-		List<Candle> eurDaily = primaryBuilder.getCandles(instrument, Timeframe.DAILY);
-		List<Candle> eurHour4 = primaryBuilder.getCandles(instrument, Timeframe.HOUR_4);
-		List<Candle> eurHour1 = primaryBuilder.getCandles(instrument, Timeframe.HOUR_1);
+		// -- Step 3: Download and aggregate DXY data --------------------
+		System.out.println("\n-- Step 3: Downloading DXY (US Dollar Index) ----------");
+		// Download DXY with 3 months of lead-in data for structure analysis
+		// The bias engine needs prior Monthly/Weekly candles to establish trend
+		LocalDate dxyStart = startDate.minusMonths(3);
+		System.out.println("  DXY range: " + dxyStart + " to " + endDate
+				+ " (3-month lead-in for structure)");
+		HistoricalCandleBuilder dxyBuilder = downloadAndAggregate("DOLLAR_IDX", dxyStart, endDate);
 
-		List<Candle> usdxMonthlyProxy = SyntheticUsdxBuilder.fromEurUsd(eurDaily);
-		List<Candle> usdxWeeklyProxy = SyntheticUsdxBuilder.fromEurUsd(eurHour4);
-		List<Candle> usdxDailyProxy = SyntheticUsdxBuilder.fromEurUsd(eurHour1);
+		List<Candle> usdxMonthlyProxy;
+		List<Candle> usdxWeeklyProxy;
+		List<Candle> usdxDailyProxy;
 
-		System.out.println("  Monthly proxy (from DAILY):  " + usdxMonthlyProxy.size());
-		System.out.println("  Weekly proxy  (from HOUR_4): " + usdxWeeklyProxy.size());
-		System.out.println("  Daily proxy   (from HOUR_1): " + usdxDailyProxy.size());
+		if (dxyBuilder.totalCandles() > 0) {
+			// Use real DXY data
+			// DAILY as monthly proxy, HOUR_4 as weekly proxy, HOUR_1 as daily proxy
+			// (For short backtests we don't have enough data for real monthly/weekly)
+			usdxMonthlyProxy = dxyBuilder.getCandles("DOLLAR_IDX", Timeframe.DAILY);
+			usdxWeeklyProxy = dxyBuilder.getCandles("DOLLAR_IDX", Timeframe.HOUR_4);
+			usdxDailyProxy = dxyBuilder.getCandles("DOLLAR_IDX", Timeframe.HOUR_1);
+
+			System.out.println("  Using REAL DXY data");
+			System.out.println("  Monthly proxy (DXY DAILY):  " + usdxMonthlyProxy.size());
+			System.out.println("  Weekly proxy  (DXY HOUR_4): " + usdxWeeklyProxy.size());
+			System.out.println("  Daily proxy   (DXY HOUR_1): " + usdxDailyProxy.size());
+
+			// Free DXY builder memory
+			dxyBuilder = null;
+			System.gc();
+		} else {
+			// Fallback to synthetic if DXY download fails
+			System.out.println("  DXY download failed -- falling back to synthetic USDX");
+			List<Candle> eurDaily = primaryBuilder.getCandles(instrument, Timeframe.DAILY);
+			List<Candle> eurHour4 = primaryBuilder.getCandles(instrument, Timeframe.HOUR_4);
+			List<Candle> eurHour1 = primaryBuilder.getCandles(instrument, Timeframe.HOUR_1);
+
+			usdxMonthlyProxy = SyntheticUsdxBuilder.fromEurUsd(eurDaily);
+			usdxWeeklyProxy = SyntheticUsdxBuilder.fromEurUsd(eurHour4);
+			usdxDailyProxy = SyntheticUsdxBuilder.fromEurUsd(eurHour1);
+		}
 
 		// -- Step 4: Check SMT Divergence -------------------------------
 		Optional<SmtDivergenceSignal> smtSignal = Optional.empty();

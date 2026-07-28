@@ -39,8 +39,8 @@ public class BacktestEngine {
 			int maxOpenTrades, long spreadScaled) {
 		this.aggregator = new SignalAggregator(
 				new FairValueGapDetector(),
-				new OrderBlockDetector(5, 1.5),
-				new JudasSwingDetector(2, 5, 1.5));
+				new OrderBlockDetector(14, 2.0),
+				new JudasSwingDetector(3, 20, 2.5));
 		this.killzoneService = new KillzoneService();
 		this.calendarService = new EconomicCalendarService();
 		this.usdxBiasEngine = new UsdxBiasEngine(3);
@@ -124,7 +124,7 @@ public class BacktestEngine {
 
 		int warmupPeriod = 30;
 		int cooldownBars = 0; // bars remaining before next trade allowed
-		int cooldownPeriod = 30; // wait 30 LTF candles after opening a trade
+		int cooldownPeriod = 24; // wait 30 LTF candles after opening a trade
 
 		for (int i = warmupPeriod; i < ltfCandles.size(); i++) {
 			Candle currentCandle = ltfCandles.get(i);

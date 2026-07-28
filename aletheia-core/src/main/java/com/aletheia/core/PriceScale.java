@@ -42,10 +42,10 @@ public final class PriceScale {
 					"USD_JPY", "USD_CHF", "USD_CAD" ->
 				100_000L;
 			case "XAU_USD" -> 100L;
+			case "DOLLAR_IDX" -> 1_000L;
 			case "US30_USD", "NAS100_USD",
 					"SPX500_USD" ->
 				10L;
-			// Safe default for unknown instruments
 			default -> 100_000L;
 		};
 	}
@@ -82,7 +82,7 @@ public final class PriceScale {
 	 *
 	 * Used by RiskManager to calculate stop loss distance in pips.
 	 */
-	
+
 	public static long onePip(String instrument) {
 		return switch (instrument) {
 			case "EUR_USD", "GBP_USD", "AUD_USD" -> 10L;

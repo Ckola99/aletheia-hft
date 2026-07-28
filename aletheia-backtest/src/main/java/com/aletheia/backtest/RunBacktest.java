@@ -18,8 +18,8 @@ public class RunBacktest {
 	public static void main(String[] args) {
 
 		// ── CONFIGURE YOUR BACKTEST HERE ─────────────────────────────
-		LocalDate startDate = LocalDate.of(2023, 1, 2);
-		LocalDate endDate = LocalDate.of(2023, 12, 29);
+		LocalDate startDate = LocalDate.of(2023, 6, 2);
+		LocalDate endDate = LocalDate.of(2023, 6, 30);
 
 		// Risk settings
 		double riskRewardRatio = 3.0;

@@ -33,7 +33,7 @@ public class OrderManager {
 	private long lastSignalEntryPrice = 0;
 	private long lastSignalSweepPrice = 0;
 	private java.time.Instant lastSignalTime = null;
-	private static final long DUPLICATE_PRICE_THRESHOLD = 50L; // 5 pips
+	private static final long DUPLICATE_PRICE_THRESHOLD = 150L; // 5 pips
 	private static final java.time.Duration DUPLICATE_TIME_THRESHOLD = java.time.Duration.ofMinutes(30);
 
 	private final List<ManagedOrder> allOrders = new ArrayList<>();
@@ -207,7 +207,7 @@ public class OrderManager {
 		long entryDiff = Math.abs(signal.idealEntry() - lastSignalEntryPrice);
 		long sweepDiff = Math.abs(signal.sweepPrice() - lastSignalSweepPrice);
 
-		return entryDiff < DUPLICATE_PRICE_THRESHOLD
-				&& sweepDiff < DUPLICATE_PRICE_THRESHOLD;
+		return entryDiff <= DUPLICATE_PRICE_THRESHOLD
+				&& sweepDiff <= DUPLICATE_PRICE_THRESHOLD;
 	}
 }

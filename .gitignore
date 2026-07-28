@@ -37,6 +37,7 @@ Thumbs.db        # Windows thumbnail cache
 # ── Logs ───────────────────────────────────────────────────────
 *.log
 logs/
+*.txt
 
 # ── Terraform ──────────────────────────────────────────────────
 # .terraform/ contains downloaded provider binaries (hundreds of MB)

@@ -52,6 +52,7 @@ public class Bi5TickParser {
 				0.00001;
 			case "USD_JPY" -> 0.001;
 			case "XAU_USD" -> 0.001;
+			case "DOLLAR_IDX" -> 0.001;
 			default -> 0.00001;
 		};
 	}
@@ -61,12 +62,13 @@ public class Bi5TickParser {
 	 * Dukascopy uses "EURUSD", we use "EUR_USD".
 	 */
 	public static String toOandaInstrument(String dukascopySymbol) {
+		if (dukascopySymbol.equals("XAUUSD"))
+			return "XAU_USD";
+		if (dukascopySymbol.equals("DOLLARIDXUSD"))
+			return "DOLLAR_IDX";
 		if (dukascopySymbol.length() == 6) {
 			return dukascopySymbol.substring(0, 3) + "_" + dukascopySymbol.substring(3);
 		}
-		// Gold: XAUUSD → XAU_USD
-		if (dukascopySymbol.equals("XAUUSD"))
-			return "XAU_USD";
 		return dukascopySymbol;
 	}
 
@@ -75,6 +77,8 @@ public class Bi5TickParser {
 	 * "EUR_USD" → "EURUSD"
 	 */
 	public static String toDukascopySymbol(String instrument) {
+		if (instrument.equals("DOLLAR_IDX"))
+			return "DOLLARIDXUSD";
 		return instrument.replace("_", "");
 	}
 
