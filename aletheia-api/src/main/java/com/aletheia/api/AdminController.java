@@ -56,7 +56,7 @@ public class AdminController {
 	 */
 	@PostMapping("/kill-switch")
 	public ResponseEntity<Map<String, Object>> activateKillSwitch(
-			@RequestParam(defaultValue = "Manual activation") String reason) {
+			@RequestParam(name="reason", defaultValue = "Manual activation") String reason) {
 
 		boolean activated = killSwitch.activate(reason);
 
