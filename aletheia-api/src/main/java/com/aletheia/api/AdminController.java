@@ -1,5 +1,6 @@
 package com.aletheia.api;
 
+import com.aletheia.calendar.EconomicCalendarService;
 import com.aletheia.execution.KillSwitch;
 import com.aletheia.execution.ManagedOrder;
 import com.aletheia.execution.OrderManager;
@@ -7,6 +8,7 @@ import com.aletheia.execution.OrderManager;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,10 +27,13 @@ public class AdminController {
 
 	private final KillSwitch killSwitch;
 	private final OrderManager orderManager;
+	private final EconomicCalendarService calendarService;
 
-	public AdminController(KillSwitch killSwitch, OrderManager orderManager) {
+	public AdminController(KillSwitch killSwitch, OrderManager orderManager,
+			EconomicCalendarService calendarService) {
 		this.killSwitch = killSwitch;
 		this.orderManager = orderManager;
+		this.calendarService = calendarService;
 	}
 
 	/**
@@ -56,7 +61,7 @@ public class AdminController {
 	 */
 	@PostMapping("/kill-switch")
 	public ResponseEntity<Map<String, Object>> activateKillSwitch(
-			@RequestParam(name="reason", defaultValue = "Manual activation") String reason) {
+			@RequestParam(name = "reason", defaultValue = "Manual activation") String reason) {
 
 		boolean activated = killSwitch.activate(reason);
 
@@ -98,5 +103,24 @@ public class AdminController {
 		map.put("killzone", order.killzone());
 		map.put("pnl", order.realisedPnl());
 		return map;
+	}
+
+	/**
+	 * GET /admin/calendar
+	 * Shows what's loaded and the next upcoming high-impact event per instrument,
+	 * with UTC times so you can sanity-check timezone alignment.
+	 */
+	@GetMapping("/calendar")
+	public ResponseEntity<Map<String, Object>> calendar() {
+		Map<String, Object> out = new HashMap<>();
+		out.put("cacheSize", calendarService.cacheSize());
+		out.put("nowUtc", Instant.now().toString());
+
+		List<String> all = calendarService.allEvents().stream()
+				.map(e -> e.scheduledTime() + " | " + e.currency()
+						+ " | " + e.impact() + " | " + e.eventName())
+				.toList();
+		out.put("events", all);
+		return ResponseEntity.ok(out);
 	}
 }

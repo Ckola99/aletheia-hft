@@ -143,4 +143,11 @@ public class EconomicCalendarService {
 			default -> Set.of("USD");
 		};
 	}
+
+	/**
+	 * Returns all cached events (immutable). For monitoring / debugging.
+	 */
+	public List<EconomicEvent> allEvents() {
+		return events;
+	}
 }
