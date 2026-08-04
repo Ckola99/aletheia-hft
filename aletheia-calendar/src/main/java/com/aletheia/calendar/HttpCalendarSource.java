@@ -111,7 +111,7 @@ public class HttpCalendarSource implements CalendarDataSource {
 
 	private static String defaultHttpGet(String url) {
 		OkHttpClient client = new OkHttpClient.Builder()
-				.callTimeout(Duration.ofSeconds(10))
+				.callTimeout(Duration.ofSeconds(60))
 				.build();
 		Request request = new Request.Builder().url(url).get().build();
 		try (Response response = client.newCall(request).execute()) {

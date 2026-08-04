@@ -46,8 +46,41 @@ public class CalendarLoaderService {
 		this.lookaheadDays = lookaheadDays;
 	}
 
+	private static final int MAX_STARTUP_RETRIES = 6; // ~30 min of retries
+	private static final long RETRY_DELAY_MS = 5 * 60 * 1000; // 5 minutes
+	private final java.util.concurrent.atomic.AtomicInteger startupRetries = new java.util.concurrent.atomic.AtomicInteger(
+			0);
+
 	@PostConstruct
 	public void init() {
+		load();
+		// If the first load got nothing (e.g. Render service still cold),
+		// schedule retries so we don't run with an empty calendar until the
+		// next daily refresh.
+		if (calendarService.cacheSize() == 0) {
+			System.out.println("[CalendarLoaderService] Calendar empty at startup "
+					+ "(service may be warming up). Will retry in 5 minutes.");
+		}
+	}
+
+	/**
+	 * Retries the initial load every 5 minutes if the calendar is still empty,
+	 * up to a cap. This covers the cold-start case: the Render calendar service
+	 * spins down when idle and takes ~30-60s to wake, so the engine's first
+	 * load can miss it. Once events load, retries stop and the normal daily
+	 * schedule takes over.
+	 */
+	@Scheduled(fixedDelay = RETRY_DELAY_MS, initialDelay = RETRY_DELAY_MS)
+	public void retryUntilLoaded() {
+		if (calendarService.cacheSize() > 0) {
+			return; // already have data — nothing to do
+		}
+		int attempt = startupRetries.incrementAndGet();
+		if (attempt > MAX_STARTUP_RETRIES) {
+			return; // gave up on startup retries; daily refresh still runs
+		}
+		System.out.println("[CalendarLoaderService] Startup retry " + attempt
+				+ "/" + MAX_STARTUP_RETRIES + " — attempting calendar load...");
 		load();
 	}
 
