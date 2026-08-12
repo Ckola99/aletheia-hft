@@ -10,8 +10,8 @@ import com.aletheia.data.CandleListener;
 import com.aletheia.data.CandleRepository;
 import com.aletheia.execution.KillSwitch;
 import com.aletheia.execution.ManagedOrder;
-import com.aletheia.execution.OandaOrderExecutor;
 import com.aletheia.execution.OrderManager;
+import com.aletheia.execution.BrokerExecutor;
 import com.aletheia.strategy.*;
 
 import jakarta.annotation.PostConstruct;
@@ -45,8 +45,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * 2. Check SMT divergence between the traded pair and its partner
  * 3. Determine killzone and news blackout
  * 4. SignalAggregator.evaluate(context)
- * 5. On a signal -> OrderManager.createOrder ->
- * OandaOrderExecutor.placeLimitOrder
+ * 5. On a signal -> OrderManager.createOrder -> BrokerExecutor.placeLimitOrder
  *
  * DESIGN NOTES:
  *
@@ -63,6 +62,10 @@ import java.util.concurrent.atomic.AtomicLong;
  * warm them up once at startup from the CandleRepository. If the DB is empty
  * on a fresh install, the service simply won't trade until enough live candles
  * accrue -- which is safe.
+ *
+ * - BROKER-AGNOSTIC. This service depends only on BrokerExecutor, not any
+ * concrete broker. Swapping OANDA for a cTrader FIX executor (or any future
+ * broker) requires no change here — only the wiring in TradingEngineConfig.
  *
  * - USDX BIAS SOURCE. For now the dollar bias is derived synthetically from the
  * EUR/USD inverse (same method the early backtests used). This is a KNOWN
@@ -100,7 +103,7 @@ public class LiveSignalService implements CandleListener {
 	private final SwingPointRegistry smtRegistry;
 	private final SmtDivergenceDetector smtDetector;
 	private final OrderManager orderManager;
-	private final OandaOrderExecutor executor;
+	private final BrokerExecutor executor;
 	private final KillSwitch killSwitch;
 	private final DxyFeedService dxyFeed;
 	private final Executor evaluationExecutor;
@@ -131,7 +134,7 @@ public class LiveSignalService implements CandleListener {
 			SwingPointRegistry smtRegistry,
 			SmtDivergenceDetector smtDetector,
 			OrderManager orderManager,
-			OandaOrderExecutor executor,
+			BrokerExecutor executor,
 			KillSwitch killSwitch,
 			DxyFeedService dxyFeed,
 			@Value("${trading.instruments}") String[] instruments,
@@ -161,7 +164,7 @@ public class LiveSignalService implements CandleListener {
 			SwingPointRegistry smtRegistry,
 			SmtDivergenceDetector smtDetector,
 			OrderManager orderManager,
-			OandaOrderExecutor executor,
+			BrokerExecutor executor,
 			KillSwitch killSwitch,
 			DxyFeedService dxyFeed,
 			String[] instruments,
@@ -316,13 +319,13 @@ public class LiveSignalService implements CandleListener {
 			return; // max positions / duplicate rejected
 
 		ManagedOrder order = maybeOrder.get();
-		Optional<String> oandaOrderId = executor.placeLimitOrder(order);
-		oandaOrderId.ifPresent(order::setOandaOrderId);
+		Optional<String> brokerOrderId = executor.placeLimitOrder(order);
+		brokerOrderId.ifPresent(order::setOandaOrderId);
 
 		ordersPlaced.incrementAndGet();
 		System.out.println("[LiveSignalService] Order placed for " + instrument
 				+ " " + signal.bias() + " grade=" + signal.grade()
-				+ " oandaId=" + oandaOrderId.orElse("FAILED"));
+				+ " brokerId=" + brokerOrderId.orElse("FAILED"));
 	}
 
 	/**
@@ -351,7 +354,7 @@ public class LiveSignalService implements CandleListener {
 		List<Candle> daily = invertToUsdx(snapshot(usdxSource, USDX_DAY));
 		return usdxBiasEngine.compute(monthly, weekly, daily);
 	}
-	
+
 	/**
 	 * Updates the SMT swing registry for this pair and its partner, then checks
 	 * for divergence. Returns empty if there is no configured partner.

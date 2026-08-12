@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import jakarta.annotation.PreDestroy;
+import com.aletheia.data.PricingStream;
 
 /**
  * Starts the OANDA pricing stream when the application boots.
@@ -38,7 +39,7 @@ import jakarta.annotation.PreDestroy;
 @Profile("!test")
 public class TradingEngineRunner implements CommandLineRunner {
 
-	private final OandaPricingStream pricingStream;
+	private final PricingStream pricingStream;
 	private final TickRepository tickRepository;
 	private final OrderExpiryService orderExpiryService;
 	private final KillSwitch killSwitch;

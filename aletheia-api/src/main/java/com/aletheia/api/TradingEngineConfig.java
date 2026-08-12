@@ -24,6 +24,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
+import com.aletheia.execution.BrokerExecutor;
+import com.aletheia.data.PricingStream;
 
 /**
  * Spring Configuration that wires the entire trading data pipeline.
@@ -169,7 +171,7 @@ public class TradingEngineConfig {
 	}
 
 	@Bean
-	public OandaOrderExecutor oandaOrderExecutor(
+	public BrokerExecutor brokerExecutor(
 			@Value("${oanda.api-key}") String apiKey,
 			@Value("${oanda.account-id}") String accountId,
 			@Value("${oanda.base-url}") String baseUrl) {
@@ -178,18 +180,17 @@ public class TradingEngineConfig {
 
 	@Bean
 	public KillSwitch killSwitch(OrderManager orderManager,
-			OandaOrderExecutor executor) {
+			BrokerExecutor executor) {
 		return new KillSwitch(orderManager, executor);
 	}
 
 	@Bean
 	public OrderExpiryService orderExpiryService(
 			OrderManager orderManager,
-			OandaOrderExecutor executor,
+			BrokerExecutor executor,
 			KillzoneService killzoneService) {
 		return new OrderExpiryService(orderManager, executor, killzoneService);
 	}
-
 	/**
 	 * Creates the pricing stream AND wires everything together.
 	 *
@@ -203,7 +204,7 @@ public class TradingEngineConfig {
 	 * The stream is NOT started yet — that happens in TradingEngineRunner.
 	 */
 	@Bean
-	public OandaPricingStream oandaPricingStream(
+	public PricingStream pricingStream(
 			OandaConfig oandaConfig,
 			CandleAggregator candleAggregator,
 			TickRepository tickRepository,

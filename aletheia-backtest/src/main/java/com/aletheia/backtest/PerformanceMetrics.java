@@ -1,5 +1,6 @@
 package com.aletheia.backtest;
 
+import com.aletheia.core.KillzoneWindow;
 import com.aletheia.strategy.SignalGrade;
 
 import java.util.List;
@@ -226,6 +227,38 @@ public class PerformanceMetrics {
 		System.out.printf("  A  Win Rate:      %.1f%% (%d trades)%n",
 				winRateA(),
 				trades.stream().filter(t -> t.grade() == SignalGrade.A).count());
-		System.out.println("===================================================");
-	}
+		System.out.println("---------------------------------------------------");
+                System.out.println("  BY KILLZONE");
+                printKillzoneBreakdown();
+                System.out.println("===================================================");
+        }
+
+        /**
+         * Prints win rate, trade count, and net pips for each killzone, so we
+         * can see where the edge actually concentrates (London vs New York).
+         */
+        private void printKillzoneBreakdown() {
+                java.util.Map<KillzoneWindow, List<SimulatedTrade>> byZone =
+                                trades.stream().collect(
+                                        java.util.stream.Collectors.groupingBy(
+                                                SimulatedTrade::killzone));
+
+                byZone.entrySet().stream()
+                        .sorted(java.util.Map.Entry.comparingByKey())
+                        .forEach(entry -> {
+                                KillzoneWindow zone = entry.getKey();
+                                List<SimulatedTrade> zoneTrades = entry.getValue();
+
+                                long wins = zoneTrades.stream()
+                                                .filter(SimulatedTrade::isWin).count();
+                                int total = zoneTrades.size();
+                                double winPct = total == 0 ? 0.0
+                                                : (wins * 100.0) / total;
+                                double netPips = zoneTrades.stream()
+                                                .mapToDouble(SimulatedTrade::pnlPips).sum();
+
+                                System.out.printf("  %-14s %2d trades, %.1f%% win, %+.1f pips%n",
+                                                zone, total, winPct, netPips);
+                        });
+        }
 }

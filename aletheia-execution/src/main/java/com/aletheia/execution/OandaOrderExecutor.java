@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * We implement a simple manual circuit breaker here instead of Resilience4j
  * to keep dependencies minimal and the logic transparent.
  */
-public class OandaOrderExecutor {
+public class OandaOrderExecutor implements BrokerExecutor{
 
 	private final String apiKey;
 	private final String accountId;

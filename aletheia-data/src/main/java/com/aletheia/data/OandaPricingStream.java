@@ -44,7 +44,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * - OkHttpClient is thread-safe by design
  */
 
-public class OandaPricingStream {
+public class OandaPricingStream implements PricingStream{
 
 	private final OandaConfig config;
 	private final String[] instruments;

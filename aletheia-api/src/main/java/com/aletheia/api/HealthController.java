@@ -1,6 +1,7 @@
 package com.aletheia.api;
 
 import com.aletheia.data.OandaPricingStream;
+import com.aletheia.data.PricingStream;
 import com.aletheia.execution.KillSwitch;
 
 import org.springframework.http.ResponseEntity;
@@ -19,7 +20,7 @@ import java.util.Map;
 @RestController
 public class HealthController {
 
-	private final OandaPricingStream pricingStream;
+	private final PricingStream pricingStream;
 	private final KillSwitch killSwitch;
 
 	public HealthController(OandaPricingStream pricingStream, KillSwitch killSwitch) {

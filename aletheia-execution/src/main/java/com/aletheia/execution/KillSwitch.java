@@ -30,9 +30,9 @@ public class KillSwitch {
 	private volatile String activationReason;
 
 	private final OrderManager orderManager;
-	private final OandaOrderExecutor executor;
+	private final BrokerExecutor executor;
 
-	public KillSwitch(OrderManager orderManager, OandaOrderExecutor executor) {
+	public KillSwitch(OrderManager orderManager, BrokerExecutor executor) {
 		this.orderManager = orderManager;
 		this.executor = executor;
 	}

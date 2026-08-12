@@ -1,9 +1,11 @@
 package com.aletheia.backtest;
 
+import com.aletheia.core.KillzoneWindow;
 import com.aletheia.core.MarketBias;
 import com.aletheia.core.PriceScale;
 import com.aletheia.strategy.SignalGrade;
 import com.aletheia.strategy.TradeSignal;
+import com.aletheia.core.KillzoneWindow;
 
 import java.time.Instant;
 
@@ -26,6 +28,7 @@ public class SimulatedTrade {
 	private final long takeProfit;
 	private final Instant entryTime;
 	private final SignalGrade grade;
+	private final KillzoneWindow killzone;
 
 	// These are set when the trade exits
 	private Long exitPrice;
@@ -40,6 +43,7 @@ public class SimulatedTrade {
 		this.takeProfit = takeProfit;
 		this.entryTime = signal.generatedAt();
 		this.grade = signal.grade();
+		this.killzone = signal.killzone();
 	}
 
 	/**
@@ -58,7 +62,7 @@ public class SimulatedTrade {
 	 * @param time when this candle closed
 	 * @return true if the trade was closed by this candle
 	 */
-	
+
 	public boolean checkExit(long high, long low, Instant time) {
 		if (isOpen()) {
 			if (direction == MarketBias.BULLISH) {
@@ -190,5 +194,9 @@ public class SimulatedTrade {
 
 	public Instant exitTime() {
 		return exitTime;
+	}
+
+	public KillzoneWindow killzone() {
+		return killzone;
 	}
 }

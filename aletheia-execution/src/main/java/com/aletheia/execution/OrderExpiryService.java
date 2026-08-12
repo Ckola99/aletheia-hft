@@ -30,11 +30,11 @@ import java.util.List;
 public class OrderExpiryService {
 
 	private final OrderManager orderManager;
-	private final OandaOrderExecutor executor;
+	private final BrokerExecutor executor;
 	private final KillzoneService killzoneService;
 
 	public OrderExpiryService(OrderManager orderManager,
-			OandaOrderExecutor executor,
+			BrokerExecutor executor,
 			KillzoneService killzoneService) {
 		this.orderManager = orderManager;
 		this.executor = executor;

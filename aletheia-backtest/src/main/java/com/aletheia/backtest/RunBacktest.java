@@ -18,8 +18,8 @@ public class RunBacktest {
 	public static void main(String[] args) {
 
 		// ── CONFIGURE YOUR BACKTEST HERE ─────────────────────────────
-		LocalDate startDate = LocalDate.of(2023, 8, 1);
-		LocalDate endDate = LocalDate.of(2023, 8, 31);
+		LocalDate startDate = LocalDate.of(2023, 1, 1);
+		LocalDate endDate = LocalDate.of(2023, 12, 31);
 
 		// Risk settings
 		double riskRewardRatio = 3.0;
@@ -84,10 +84,11 @@ public class RunBacktest {
 			int tradeNum = 1;
 			for (SimulatedTrade trade : result.trades()) {
 				if (trade.isClosed()) {
-					System.out.printf("  #%d  %s %s  entry=%d  exit=%d  P&L=%.1f pips  %s  [%s]%n",
+					System.out.printf("  #%d  %s %s %-14s entry=%d  exit=%d  P&L=%.1f pips  %s  [%s]%n",
 							tradeNum++,
 							trade.direction(),
 							trade.instrument(),
+							trade.killzone(),
 							trade.entryPrice(),
 							trade.exitPrice(),
 							trade.pnlPips(),
