@@ -27,6 +27,38 @@ public class BacktestEngine {
 	private final int maxOpenTrades;
 	private final long spreadScaled;
 
+	// Mirrors OrderExpiryService's safety-net cutoff for stale pending orders.
+	private static final long MAX_PENDING_AGE_MS = 3 * 60 * 60 * 1000;
+
+	/**
+	 * A five-pillar-validated signal waiting for price to trade back into the
+	 * FVG entry zone, exactly like the resting LIMIT order OandaOrderExecutor
+	 * places live. Not yet a trade — no P&L, no open-position slot used.
+	 */
+	private record PendingSignal(TradeSignal signal, long effectiveEntry,
+			long sl, long tp, KillzoneWindow killzone, Instant generatedAt) {
+	}
+
+	/**
+	 * A resting limit order fills when price actually trades through the
+	 * entry level -- i.e. the candle's range contains idealEntry -- not
+	 * merely because a signal was generated.
+	 */
+	static boolean isLimitTouched(long idealEntry, long candleLow, long candleHigh) {
+		return idealEntry >= candleLow && idealEntry <= candleHigh;
+	}
+
+	/**
+	 * Mirrors OrderExpiryService.checkAndExpire: a pending order is only
+	 * valid for the killzone it was raised in, and dies after 3 hours
+	 * regardless, even if that killzone is somehow still active.
+	 */
+	static boolean isPendingExpired(KillzoneWindow nowZone, KillzoneWindow orderKillzone, long ageMs) {
+		return nowZone == KillzoneWindow.NONE
+				|| nowZone != orderKillzone
+				|| ageMs > MAX_PENDING_AGE_MS;
+	}
+
 	/**
 	 * @param riskRewardRatio target R:R (e.g. 3.0)
 	 * @param slBufferScaled  extra buffer beyond sweep price for SL
@@ -106,8 +138,10 @@ public class BacktestEngine {
 
 		List<SimulatedTrade> allTrades = new ArrayList<>();
 		List<SimulatedTrade> openTrades = new ArrayList<>();
+		List<PendingSignal> pendingSignals = new ArrayList<>();
 		int signalsGenerated = 0;
 		int signalsRejected = 0;
+		int signalsExpiredUnfilled = 0;
 
 		System.out.println("=====================================================");
 		System.out.println("  BACKTEST STARTING");
@@ -138,6 +172,35 @@ public class BacktestEngine {
 				}
 			}
 			openTrades.removeAll(toRemove);
+
+			// Check pending limit orders for a fill or expiry, exactly like
+			// OrderExpiryService does live: a resting order only stays valid
+			// for the killzone it was raised in (plus a 3-hour safety cutoff).
+			// This runs regardless of maxOpenTrades/cooldown, same as live
+			// where expiry isn't gated on how many positions are open.
+			List<PendingSignal> stillPending = new ArrayList<>();
+			for (PendingSignal p : pendingSignals) {
+				KillzoneWindow nowZone = killzoneService.classify(currentCandle.time());
+				long ageMs = currentCandle.time().toEpochMilli() - p.generatedAt().toEpochMilli();
+				boolean expired = isPendingExpired(nowZone, p.killzone(), ageMs);
+				boolean touched = isLimitTouched(p.signal().idealEntry(),
+						currentCandle.low(), currentCandle.high());
+
+				if (touched && openTrades.size() < maxOpenTrades) {
+					SimulatedTrade trade = new SimulatedTrade(
+							p.signal(), p.effectiveEntry(), p.sl(), p.tp());
+					openTrades.add(trade);
+					allTrades.add(trade);
+				} else if (expired) {
+					signalsExpiredUnfilled++;
+				} else {
+					// Still waiting -- either untouched, or touched but at
+					// capacity (mirrors OrderManager only opening once a
+					// slot is free; the order itself stays live at OANDA).
+					stillPending.add(p);
+				}
+			}
+			pendingSignals = stillPending;
 
 			if (openTrades.size() >= maxOpenTrades)
 				continue;
@@ -200,27 +263,31 @@ public class BacktestEngine {
 			TradeSignal s = signal.get();
 			signalsGenerated++;
 
-			// Calculate SL and TP with spread applied
-			long sl, tp;
+			// Calculate SL and TP with spread applied to the same entry price
+			// that will end up booked as the fill (see SimulatedTrade P&L).
+			long sl, tp, effectiveEntry;
 			if (s.bias() == MarketBias.BULLISH) {
 				// Long: enter at ask (ideal entry + half spread)
-				long effectiveEntry = s.idealEntry() + (spreadScaled / 2);
+				effectiveEntry = s.idealEntry() + (spreadScaled / 2);
 				sl = s.sweepPrice() - slBufferScaled;
 				long risk = effectiveEntry - sl;
 				tp = effectiveEntry + (long) (risk * riskRewardRatio);
 			} else {
 				// Short: enter at bid (ideal entry - half spread)
-				long effectiveEntry = s.idealEntry() - (spreadScaled / 2);
+				effectiveEntry = s.idealEntry() - (spreadScaled / 2);
 				sl = s.sweepPrice() + slBufferScaled;
 				long risk = sl - effectiveEntry;
 				tp = effectiveEntry - (long) (risk * riskRewardRatio);
 			}
 
-			SimulatedTrade trade = new SimulatedTrade(s, sl, tp);
-			openTrades.add(trade);
-			allTrades.add(trade);
+			// Don't fill immediately — mirror the live LIMIT order and wait
+			// for price to actually trade back into the FVG zone.
+			pendingSignals.add(new PendingSignal(
+					s, effectiveEntry, sl, tp, s.killzone(), s.generatedAt()));
 
-			// Start cooldown — don't open another trade for 50 candles
+			// Start cooldown — don't evaluate another signal for a while,
+			// whether or not this one ends up filling (prevents the same
+			// setup from stacking duplicate pending orders every candle).
 			cooldownBars = cooldownPeriod;
 		}
 
@@ -232,10 +299,12 @@ public class BacktestEngine {
 			}
 		}
 
-		System.out.println("  Signals generated: " + signalsGenerated);
-		System.out.println("  Contexts rejected: " + signalsRejected);
-		System.out.println("  Total trades:      " + allTrades.size());
+		System.out.println("  Signals generated:  " + signalsGenerated);
+		System.out.println("  Contexts rejected:  " + signalsRejected);
+		System.out.println("  Expired unfilled:   " + signalsExpiredUnfilled);
+		System.out.println("  Still pending:      " + pendingSignals.size());
+		System.out.println("  Total trades:       " + allTrades.size());
 
-		return new BacktestResult(allTrades, signalsGenerated, signalsRejected);
+		return new BacktestResult(allTrades, signalsGenerated, signalsRejected, signalsExpiredUnfilled);
 	}
 }

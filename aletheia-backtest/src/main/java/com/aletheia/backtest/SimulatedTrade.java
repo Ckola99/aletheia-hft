@@ -36,9 +36,21 @@ public class SimulatedTrade {
 	private boolean stopped; // true if hit SL, false if hit TP
 
 	public SimulatedTrade(TradeSignal signal, long stopLoss, long takeProfit) {
+		this(signal, signal.idealEntry(), stopLoss, takeProfit);
+	}
+
+	/**
+	 * @param entryPrice the actual booked fill price, which may differ from
+	 *                   signal.idealEntry() once spread is applied to the fill
+	 *                   (see BacktestEngine.effectiveEntry). Keeping this
+	 *                   separate from idealEntry is what makes P&L match the
+	 *                   SL/TP distances that were computed off the same
+	 *                   spread-adjusted price.
+	 */
+	public SimulatedTrade(TradeSignal signal, long entryPrice, long stopLoss, long takeProfit) {
 		this.instrument = signal.instrument();
 		this.direction = signal.bias();
-		this.entryPrice = signal.idealEntry();
+		this.entryPrice = entryPrice;
 		this.stopLoss = stopLoss;
 		this.takeProfit = takeProfit;
 		this.entryTime = signal.generatedAt();

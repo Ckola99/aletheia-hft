@@ -223,6 +223,84 @@ class BacktestEngineTest {
 	}
 
 	@Test
+	void simulated_trade_books_pnl_against_the_actual_fill_price_not_raw_ideal_entry() {
+		// Regression test: SL/TP are computed off a spread-adjusted entry
+		// (effectiveEntry), so P&L must be booked against that same price,
+		// not the raw signal.idealEntry(). Previously these two prices
+		// diverged, silently pocketing half a spread of phantom profit
+		// (or hiding half a spread of real loss) on every trade.
+		com.aletheia.strategy.TradeSignal mockSignal = new com.aletheia.strategy.TradeSignal(
+				MarketBias.BULLISH, "EUR_USD",
+				new com.aletheia.strategy.FairValueGap(
+						com.aletheia.strategy.PdArray.Bias.BULLISH,
+						108_350L, 108_250L,
+						Instant.now(), Timeframe.SECONDS_5),
+				108_300L, 108_050L, // idealEntry = 108_300L
+				com.aletheia.core.KillzoneWindow.LONDON_OPEN,
+				com.aletheia.strategy.SignalGrade.A,
+				bearishDollar(),
+				new com.aletheia.strategy.JudasSwingSignal(
+						MarketBias.BULLISH, "EUR_USD",
+						new com.aletheia.strategy.FairValueGap(
+								com.aletheia.strategy.PdArray.Bias.BULLISH,
+								108_350L, 108_250L,
+								Instant.now(), Timeframe.SECONDS_5),
+						new com.aletheia.core.SwingPoint(
+								Instant.now(), "EUR_USD",
+								com.aletheia.core.SwingType.LOW, 108_100L,
+								Timeframe.SECONDS_5),
+						108_050L,
+						com.aletheia.core.KillzoneWindow.LONDON_OPEN,
+						com.aletheia.strategy.SignalGrade.A),
+				java.util.Optional.empty(),
+				Instant.now());
+
+		// effectiveEntry = idealEntry + half spread (e.g. 15 scaled units spread -> +7)
+		long effectiveEntry = 108_307L;
+		SimulatedTrade trade = new SimulatedTrade(mockSignal, effectiveEntry, 108_200L, 108_500L);
+
+		assertThat(trade.entryPrice()).isEqualTo(effectiveEntry);
+		assertThat(trade.entryPrice()).isNotEqualTo(mockSignal.idealEntry());
+
+		trade.checkExit(108_520L, 108_280L, Instant.now());
+		assertThat(trade.pnlScaled()).isEqualTo(108_500L - effectiveEntry);
+	}
+
+	@Test
+	void isLimitTouched_only_fires_when_price_actually_trades_through_the_entry() {
+		// Price range doesn't reach the entry level -- resting limit order
+		// stays unfilled, same as it would at the broker.
+		assertThat(BacktestEngine.isLimitTouched(108_300L, 108_310L, 108_400L)).isFalse();
+
+		// Entry sits inside this candle's [low, high] -- order fills.
+		assertThat(BacktestEngine.isLimitTouched(108_300L, 108_250L, 108_350L)).isTrue();
+
+		// Exact boundary touches count as filled.
+		assertThat(BacktestEngine.isLimitTouched(108_300L, 108_300L, 108_400L)).isTrue();
+		assertThat(BacktestEngine.isLimitTouched(108_300L, 108_200L, 108_300L)).isTrue();
+	}
+
+	@Test
+	void isPendingExpired_matches_OrderExpiryService_rules() {
+		com.aletheia.core.KillzoneWindow london = com.aletheia.core.KillzoneWindow.LONDON_OPEN;
+		com.aletheia.core.KillzoneWindow ny = com.aletheia.core.KillzoneWindow.NEW_YORK_OPEN;
+		com.aletheia.core.KillzoneWindow none = com.aletheia.core.KillzoneWindow.NONE;
+
+		// Still in the same killzone, well within 3 hours -- stays live.
+		assertThat(BacktestEngine.isPendingExpired(london, london, 30 * 60 * 1000L)).isFalse();
+
+		// Killzone ended entirely (now NONE) -- expired.
+		assertThat(BacktestEngine.isPendingExpired(none, london, 30 * 60 * 1000L)).isTrue();
+
+		// Moved into a different killzone -- expired, even though "active".
+		assertThat(BacktestEngine.isPendingExpired(ny, london, 30 * 60 * 1000L)).isTrue();
+
+		// Same killzone, but past the 3-hour safety cutoff -- expired.
+		long fourHoursMs = 4 * 60 * 60 * 1000L;
+		assertThat(BacktestEngine.isPendingExpired(london, london, fourHoursMs)).isTrue();
+	}
+
+	@Test
 	void performance_metrics_calculate_correctly() {
 		// Create a mix of wins and losses manually
 		com.aletheia.strategy.TradeSignal mockSignal = new com.aletheia.strategy.TradeSignal(
