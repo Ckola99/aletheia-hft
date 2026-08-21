@@ -27,6 +27,7 @@ public class BacktestRunner {
 	private final long slBufferScaled;
 	private final int maxOpenTrades;
 	private final long spreadScaled;
+	private final java.util.Map<String, HistoricalCandleBuilder> candleCache = new java.util.HashMap<>();
 
 	public BacktestRunner(double riskRewardRatio, long slBufferScaled,
 			int maxOpenTrades, long spreadScaled) {
@@ -65,10 +66,10 @@ public class BacktestRunner {
 
 		primaryBuilder.summary().forEach((tf, count) -> System.out.println("  " + tf + ": " + count));
 
-		List<Candle> htfCandles = primaryBuilder.getCandles(instrument, Timeframe.HOUR_1);
-		List<Candle> ltfCandles = primaryBuilder.getCandles(instrument, Timeframe.MIN_5);
+		List<Candle> htfCandles = primaryBuilder.getCandles(instrument, Timeframe.HOUR_4);
+		List<Candle> ltfCandles = primaryBuilder.getCandles(instrument, Timeframe.MIN_15);
 
-		System.out.println("  HTF (MIN_15): " + htfCandles.size() + " candles");
+		System.out.println("  HTF (HOUR_1): " + htfCandles.size() + " candles");
 		System.out.println("  LTF (MIN_1):  " + ltfCandles.size() + " candles");
 
 		if (htfCandles.size() < 30 || ltfCandles.size() < 50) {
@@ -230,10 +231,21 @@ public class BacktestRunner {
 	private HistoricalCandleBuilder downloadAndAggregate(String instrument,
 			LocalDate startDate,
 			LocalDate endDate) {
+
+		// Cache key includes the date range, since DXY is fetched with a
+		// different (wider) range than the FX pairs -- reusing a narrower
+		// cached range for a wider request would silently under-serve data.
+		String cacheKey = instrument + "|" + startDate + "|" + endDate;
+		HistoricalCandleBuilder cached = candleCache.get(cacheKey);
+		if (cached != null) {
+			System.out.println("  Reusing cached candles for " + instrument
+					+ " (" + startDate + " to " + endDate + ") -- "
+					+ cached.totalCandles() + " candles, download skipped");
+			return cached;
+		}
+
 		HistoricalCandleBuilder builder = new HistoricalCandleBuilder();
 
-		// Feed ticks directly to the builder as they download
-		// Ticks are NOT stored — only candles accumulate
 		TickRepository streamingRepo = new TickRepository(null, 1_000_000) {
 			@Override
 			public void onTick(Tick tick) {
@@ -250,6 +262,7 @@ public class BacktestRunner {
 		loader.load(instrument, startDate, endDate);
 
 		System.out.println("  Candles built: " + builder.totalCandles());
+		candleCache.put(cacheKey, builder);
 		return builder;
 	}
 }

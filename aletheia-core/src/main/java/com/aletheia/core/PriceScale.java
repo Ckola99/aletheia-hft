@@ -39,8 +39,10 @@ public final class PriceScale {
 	public static long scaleFor(String instrument) {
 		return switch (instrument) {
 			case "EUR_USD", "GBP_USD", "AUD_USD",
-					"USD_JPY", "USD_CHF", "USD_CAD" ->
+					"USD_CHF", "USD_CAD" ->
 				100_000L;
+			case "USD_JPY", "EUR_JPY", "GBP_JPY" ->
+				1_000L; // JPY pairs: 3 decimal places (e.g. 150.745)
 			case "XAU_USD" -> 100L;
 			case "DOLLAR_IDX" -> 1_000L;
 			case "US30_USD", "NAS100_USD",
@@ -86,6 +88,7 @@ public final class PriceScale {
 	public static long onePip(String instrument) {
 		return switch (instrument) {
 			case "EUR_USD", "GBP_USD", "AUD_USD" -> 10L;
+			case "USD_JPY", "EUR_JPY", "GBP_JPY" -> 10L; // 0.01 JPY = 10 units at scale 1000
 			case "XAU_USD" -> 10L;
 			case "US30_USD", "NAS100_USD" -> 10L;
 			default -> 10L;

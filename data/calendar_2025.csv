@@ -1,0 +1,73 @@
+date,time,currency,impact,event
+2025-01-10,08:30,USD,HIGH,Non-Farm Employment Change
+2025-01-14,08:30,USD,HIGH,PPI m/m
+2025-01-15,08:30,USD,HIGH,CPI m/m
+2025-01-23,22:00,JPY,HIGH,BOJ Rate Decision
+2025-01-29,14:00,USD,HIGH,FOMC Rate Decision
+2025-01-30,08:15,EUR,HIGH,Main Refinancing Rate
+2025-02-06,07:00,GBP,HIGH,Official Bank Rate
+2025-02-07,08:30,USD,HIGH,Non-Farm Employment Change
+2025-02-12,08:30,USD,HIGH,CPI m/m
+2025-02-13,08:30,USD,HIGH,PPI m/m
+2025-02-17,22:30,AUD,HIGH,RBA Rate Decision
+2025-03-06,08:15,EUR,HIGH,Main Refinancing Rate
+2025-03-07,08:30,USD,HIGH,Non-Farm Employment Change
+2025-03-12,08:30,USD,HIGH,CPI m/m
+2025-03-13,08:30,USD,HIGH,PPI m/m
+2025-03-18,23:00,JPY,HIGH,BOJ Rate Decision
+2025-03-19,14:00,USD,HIGH,FOMC Rate Decision
+2025-03-20,08:00,GBP,HIGH,Official Bank Rate
+2025-03-31,23:30,AUD,HIGH,RBA Rate Decision
+2025-04-04,08:30,USD,HIGH,Non-Farm Employment Change
+2025-04-10,08:30,USD,HIGH,CPI m/m
+2025-04-11,08:30,USD,HIGH,PPI m/m
+2025-04-17,08:15,EUR,HIGH,Main Refinancing Rate
+2025-04-30,23:00,JPY,HIGH,BOJ Rate Decision
+2025-05-02,08:30,USD,HIGH,Non-Farm Employment Change
+2025-05-07,14:00,USD,HIGH,FOMC Rate Decision
+2025-05-08,07:00,GBP,HIGH,Official Bank Rate
+2025-05-13,08:30,USD,HIGH,CPI m/m
+2025-05-15,08:30,USD,HIGH,PPI m/m
+2025-05-20,00:30,AUD,HIGH,RBA Rate Decision
+2025-06-05,08:15,EUR,HIGH,Main Refinancing Rate
+2025-06-06,08:30,USD,HIGH,Non-Farm Employment Change
+2025-06-11,08:30,USD,HIGH,CPI m/m
+2025-06-12,08:30,USD,HIGH,PPI m/m
+2025-06-16,23:00,JPY,HIGH,BOJ Rate Decision
+2025-06-18,14:00,USD,HIGH,FOMC Rate Decision
+2025-06-19,07:00,GBP,HIGH,Official Bank Rate
+2025-07-03,08:30,USD,HIGH,Non-Farm Employment Change
+2025-07-08,00:30,AUD,HIGH,RBA Rate Decision
+2025-07-15,08:30,USD,HIGH,CPI m/m
+2025-07-16,08:30,USD,HIGH,PPI m/m
+2025-07-24,08:15,EUR,HIGH,Main Refinancing Rate
+2025-07-30,14:00,USD,HIGH,FOMC Rate Decision
+2025-07-30,23:00,JPY,HIGH,BOJ Rate Decision
+2025-08-01,08:30,USD,HIGH,Non-Farm Employment Change
+2025-08-07,07:00,GBP,HIGH,Official Bank Rate
+2025-08-12,00:30,AUD,HIGH,RBA Rate Decision
+2025-08-12,08:30,USD,HIGH,CPI m/m
+2025-08-14,08:30,USD,HIGH,PPI m/m
+2025-09-05,08:30,USD,HIGH,Non-Farm Employment Change
+2025-09-10,08:30,USD,HIGH,PPI m/m
+2025-09-11,08:15,EUR,HIGH,Main Refinancing Rate
+2025-09-11,08:30,USD,HIGH,CPI m/m
+2025-09-17,14:00,USD,HIGH,FOMC Rate Decision
+2025-09-18,07:00,GBP,HIGH,Official Bank Rate
+2025-09-18,23:00,JPY,HIGH,BOJ Rate Decision
+2025-09-30,00:30,AUD,HIGH,RBA Rate Decision
+2025-10-24,08:30, shutdown-delayed),USD,CPI m/m (Sep data
+2025-10-29,14:00,USD,HIGH,FOMC Rate Decision
+2025-10-29,23:00,JPY,HIGH,BOJ Rate Decision
+2025-10-30,09:15,EUR,HIGH,Main Refinancing Rate
+2025-11-03,22:30,AUD,HIGH,RBA Rate Decision
+2025-11-06,07:00,GBP,HIGH,Official Bank Rate
+2025-11-20,08:30, shutdown-delayed),USD,Non-Farm Employment Change (Sep data
+2025-11-25,08:30, shutdown-delayed),USD,PPI m/m (Sep data
+2025-12-08,22:30,AUD,HIGH,RBA Rate Decision
+2025-12-10,14:00,USD,HIGH,FOMC Rate Decision
+2025-12-16,08:30,USD,HIGH,Non-Farm Employment Change (Nov data)
+2025-12-18,07:00,GBP,HIGH,Official Bank Rate
+2025-12-18,08:15,EUR,HIGH,Main Refinancing Rate
+2025-12-18,08:30,USD,HIGH,CPI m/m (Nov data)
+2025-12-18,22:00,JPY,HIGH,BOJ Rate Decision
