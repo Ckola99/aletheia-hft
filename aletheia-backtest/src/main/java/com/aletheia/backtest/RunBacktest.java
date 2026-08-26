@@ -7,8 +7,8 @@ public class RunBacktest {
 
 	public static void main(String[] args) {
 
-		LocalDate startDate = LocalDate.of(2024, 6, 1);
-		LocalDate endDate = LocalDate.of(2024, 6, 30);
+		LocalDate startDate = LocalDate.of(2024, 1, 1);
+		LocalDate endDate = LocalDate.of(2024, 12, 30);
 
 		double riskRewardRatio = 3.0;
 		long slBuffer = 20L;

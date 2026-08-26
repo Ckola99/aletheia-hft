@@ -7,11 +7,6 @@ import com.aletheia.core.Tick;
 import com.aletheia.core.Timeframe;
 import com.aletheia.data.DukascopyHistoryLoader;
 import com.aletheia.data.TickRepository;
-import com.aletheia.strategy.SmtDivergenceDetector;
-import com.aletheia.strategy.SmtDivergenceSignal;
-import com.aletheia.strategy.SmtPair;
-import com.aletheia.strategy.SwingPointRegistry;
-import com.aletheia.core.Timeframe;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -73,11 +68,13 @@ public class BacktestRunner {
 
 		primaryBuilder.summary().forEach((tf, count) -> System.out.println("  " + tf + ": " + count));
 
-		List<Candle> htfCandles = primaryBuilder.getCandles(instrument, Timeframe.HOUR_4);
-		List<Candle> ltfCandles = primaryBuilder.getCandles(instrument, Timeframe.MIN_15);
+		Timeframe htf = Timeframe.HOUR_1;
+		Timeframe ltf = Timeframe.MIN_5;
+		List<Candle> htfCandles = primaryBuilder.getCandles(instrument, htf);
+		List<Candle> ltfCandles = primaryBuilder.getCandles(instrument, ltf);
 
-		System.out.println("  HTF (HOUR_1): " + htfCandles.size() + " candles");
-		System.out.println("  LTF (MIN_1):  " + ltfCandles.size() + " candles");
+		System.out.println("  HTF (" + htf.displayName() + "): " + htfCandles.size() + " candles");
+		System.out.println("  LTF (" + ltf.displayName() + "): " + ltfCandles.size() + " candles");
 
 		if (htfCandles.size() < 30 || ltfCandles.size() < 50) {
 			System.out.println("  Insufficient candles for backtest. Aborting.");

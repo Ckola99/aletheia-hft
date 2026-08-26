@@ -48,7 +48,7 @@ public enum Timeframe {
 	 * Every case must return a value. The compiler enforces that all
 	 * enum values are handled (no default needed — missing case = compile error).
 	 */
-	
+
 	public long toSeconds() {
 		return switch (this) {
 			case SECONDS_5 -> 5;
@@ -86,5 +86,28 @@ public enum Timeframe {
 	 */
 	public boolean isExecutionTf() {
 		return this == SECONDS_5 || this == SECONDS_15 || this == SECONDS_30;
+	}
+
+	/**
+	 * Human-readable label for logs and reports (e.g. "4H", "15min").
+	 * NOTE: this is for DISPLAY only. Do not use it for serialization or
+	 * lookups — use name()/valueOf() for that, since the disk cache and
+	 * config depend on the exact enum constant names.
+	 */
+	public String displayName() {
+		return switch (this) {
+			case SECONDS_5 -> "5s";
+			case SECONDS_15 -> "15s";
+			case SECONDS_30 -> "30s";
+			case MIN_1 -> "1min";
+			case MIN_5 -> "5min";
+			case MIN_15 -> "15min";
+			case MIN_30 -> "30min";
+			case HOUR_1 -> "1H";
+			case HOUR_4 -> "4H";
+			case DAILY -> "1D";
+			case WEEKLY -> "1W";
+			case MONTHLY -> "1M";
+		};
 	}
 }
