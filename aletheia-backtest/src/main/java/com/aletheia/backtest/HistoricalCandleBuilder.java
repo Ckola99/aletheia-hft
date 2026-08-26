@@ -120,5 +120,12 @@ public class HistoricalCandleBuilder {
 		return closedCandles.size();
 	}
 
+	/**
+	 * Loads pre-aggregated candles directly (used by the disk cache to
+	 * bypass tick download).
+	 */
+	public void loadCandles(List<Candle> candles) {
+		closedCandles.addAll(candles);
+	}
 
 }

@@ -92,6 +92,187 @@ public class BacktestEngine {
 				usdxMonthly, usdxWeekly, usdxDaily, null, smtSignal);
 	}
 
+	/**
+	 * Run with DYNAMIC USDX bias AND per-candle SMT divergence.
+	 *
+	 * Unlike the older overload that takes a single precomputed
+	 * Optional<SmtDivergenceSignal> (frozen for the whole run), this version
+	 * receives the raw MIN_15 candle series for this instrument and its SMT
+	 * partner, and computes divergence fresh on every candle inside the loop —
+	 * exactly mirroring LiveSignalService.detectSmt(), with no look-ahead.
+	 *
+	 * @param smtInstrument   the correlated partner (e.g. "GBP_USD"), or null
+	 * @param selfMin15       this instrument's full MIN_15 series
+	 * @param smtPartnerMin15 the partner's full MIN_15 series
+	 */
+	public BacktestResult runWithLiveSmt(String instrument,
+			List<Candle> htfCandles,
+			List<Candle> ltfCandles,
+			List<Candle> usdxMonthly,
+			List<Candle> usdxWeekly,
+			List<Candle> usdxDaily,
+			String smtInstrument,
+			List<Candle> selfMin15,
+			List<Candle> smtPartnerMin15) {
+		return runInternalLiveSmt(instrument, htfCandles, ltfCandles,
+				usdxMonthly, usdxWeekly, usdxDaily,
+				smtInstrument, selfMin15, smtPartnerMin15);
+	}
+
+	/**
+	 * Internal backtest loop with PER-CANDLE SMT divergence.
+	 *
+	 * Identical to runInternal(), except SMT is computed fresh each candle from
+	 * the visible (no-look-ahead) window, mirroring LiveSignalService.detectSmt().
+	 */
+	private BacktestResult runInternalLiveSmt(String instrument,
+			List<Candle> htfCandles,
+			List<Candle> ltfCandles,
+			List<Candle> usdxMonthly,
+			List<Candle> usdxWeekly,
+			List<Candle> usdxDaily,
+			String smtInstrument,
+			List<Candle> selfMin15,
+			List<Candle> smtPartnerMin15) {
+
+		// SMT machinery — one registry/detector reused across the loop,
+		// exactly like LiveSignalService's shared smtRegistry.
+		boolean smtEnabled = (smtInstrument != null
+				&& selfMin15 != null && smtPartnerMin15 != null);
+		SwingPointRegistry smtRegistry = new SwingPointRegistry(3, 50);
+		SmtDivergenceDetector smtDetector = new SmtDivergenceDetector();
+		final Timeframe SMT_TF = Timeframe.MIN_15;
+		final int SMT_WINDOW = 300; // mirror LiveSignalService MIN_15 buffer limit
+
+		List<SimulatedTrade> allTrades = new ArrayList<>();
+		List<SimulatedTrade> openTrades = new ArrayList<>();
+		int signalsGenerated = 0;
+		int signalsRejected = 0;
+
+		System.out.println("=====================================================");
+		System.out.println("  BACKTEST STARTING (per-candle SMT)");
+		System.out.println("  Instrument:    " + instrument);
+		System.out.println("  HTF candles:   " + htfCandles.size());
+		System.out.println("  LTF candles:   " + ltfCandles.size());
+		System.out.println("  USDX bias:     DYNAMIC");
+		System.out.println("  R:R target:    " + riskRewardRatio);
+		System.out.println("  Spread:        " + spreadScaled + " scaled units ("
+				+ (spreadScaled / 10.0) + " pips)");
+		System.out.println("  SMT:           " + (smtEnabled ? smtInstrument : "disabled"));
+		System.out.println("  Max positions: " + maxOpenTrades);
+		System.out.println("=====================================================");
+
+		int warmupPeriod = 30;
+		int cooldownBars = 0;
+		int cooldownPeriod = 24;
+
+		for (int i = warmupPeriod; i < ltfCandles.size(); i++) {
+			Candle currentCandle = ltfCandles.get(i);
+			Instant now = currentCandle.time();
+
+			// Check open trades against this candle
+			List<SimulatedTrade> toRemove = new ArrayList<>();
+			for (SimulatedTrade trade : openTrades) {
+				if (trade.checkExit(currentCandle.high(), currentCandle.low(),
+						currentCandle.time())) {
+					toRemove.add(trade);
+				}
+			}
+			openTrades.removeAll(toRemove);
+
+			if (openTrades.size() >= maxOpenTrades)
+				continue;
+
+			if (cooldownBars > 0) {
+				cooldownBars--;
+				continue;
+			}
+
+			List<Candle> visibleHtf = htfCandles.stream()
+					.filter(c -> !c.time().isAfter(now))
+					.toList();
+			if (visibleHtf.size() < 10)
+				continue;
+
+			int ltfStart = Math.max(0, i - 50);
+			List<Candle> visibleLtf = ltfCandles.subList(ltfStart, i + 1);
+
+			// Dynamic USDX bias (no look-ahead)
+			List<Candle> visibleMonthly = usdxMonthly.stream()
+					.filter(c -> !c.time().isAfter(now)).toList();
+			List<Candle> visibleWeekly = usdxWeekly.stream()
+					.filter(c -> !c.time().isAfter(now)).toList();
+			List<Candle> visibleDaily = usdxDaily.stream()
+					.filter(c -> !c.time().isAfter(now)).toList();
+			UsdxBias currentBias = usdxBiasEngine.compute(
+					visibleMonthly, visibleWeekly, visibleDaily);
+
+			KillzoneWindow killzone = killzoneService.classify(now);
+			boolean newsBlackout = calendarService.isNewsBlackout(now, instrument);
+
+			// ── SMT computed PER CANDLE — mirrors LiveSignalService.detectSmt()
+			Optional<SmtDivergenceSignal> smt = Optional.empty();
+			if (smtEnabled) {
+				List<Candle> selfVisible = lastVisible(selfMin15, now, SMT_WINDOW);
+				List<Candle> partnerVisible = lastVisible(smtPartnerMin15, now, SMT_WINDOW);
+
+				if (!selfVisible.isEmpty() && !partnerVisible.isEmpty()) {
+					smtRegistry.update(instrument, SMT_TF, selfVisible);
+					smtRegistry.update(smtInstrument, SMT_TF, partnerVisible);
+					smt = smtDetector.detect(
+							new SmtPair(instrument, smtInstrument),
+							SMT_TF, smtRegistry, killzone);
+				}
+			}
+
+			MarketContext ctx = new MarketContext(
+					now, instrument, killzone, currentBias,
+					visibleHtf, visibleLtf, newsBlackout, smt);
+
+			Optional<TradeSignal> signal = aggregator.evaluate(ctx);
+
+			if (signal.isEmpty()) {
+				signalsRejected++;
+				continue;
+			}
+
+			TradeSignal s = signal.get();
+			signalsGenerated++;
+
+			long sl, tp;
+			if (s.bias() == MarketBias.BULLISH) {
+				long effectiveEntry = s.idealEntry() + (spreadScaled / 2);
+				sl = s.sweepPrice() - slBufferScaled;
+				long risk = effectiveEntry - sl;
+				tp = effectiveEntry + (long) (risk * riskRewardRatio);
+			} else {
+				long effectiveEntry = s.idealEntry() - (spreadScaled / 2);
+				sl = s.sweepPrice() + slBufferScaled;
+				long risk = sl - effectiveEntry;
+				tp = effectiveEntry - (long) (risk * riskRewardRatio);
+			}
+
+			SimulatedTrade trade = new SimulatedTrade(s, sl, tp);
+			openTrades.add(trade);
+			allTrades.add(trade);
+
+			cooldownBars = cooldownPeriod;
+		}
+
+		if (!ltfCandles.isEmpty()) {
+			Candle lastCandle = ltfCandles.get(ltfCandles.size() - 1);
+			for (SimulatedTrade trade : openTrades) {
+				trade.checkExit(lastCandle.high(), lastCandle.low(), lastCandle.time());
+			}
+		}
+
+		System.out.println("  Signals generated: " + signalsGenerated);
+		System.out.println("  Contexts rejected: " + signalsRejected);
+		System.out.println("  Total trades:      " + allTrades.size());
+
+		return new BacktestResult(allTrades, signalsGenerated, signalsRejected);
+	}
+
 	private BacktestResult runInternal(String instrument,
 			List<Candle> htfCandles,
 			List<Candle> ltfCandles,
@@ -237,5 +418,26 @@ public class BacktestEngine {
 		System.out.println("  Total trades:      " + allTrades.size());
 
 		return new BacktestResult(allTrades, signalsGenerated, signalsRejected);
+	}
+
+	/**
+	 * Returns the candles at or before 'now', capped to the last 'window' of
+	 * them. This gives the SMT detector the same bounded, no-look-ahead view
+	 * that LiveSignalService's rolling buffer provides live.
+	 *
+	 * Assumes 'all' is in chronological order (oldest first), which the
+	 * aggregated candle lists always are.
+	 */
+	private static List<Candle> lastVisible(List<Candle> all, Instant now, int window) {
+		List<Candle> visible = new ArrayList<>();
+		for (Candle c : all) {
+			if (!c.time().isAfter(now)) {
+				visible.add(c);
+			} else {
+				break; // chronological — nothing after this point is visible yet
+			}
+		}
+		int from = Math.max(0, visible.size() - window);
+		return visible.subList(from, visible.size());
 	}
 }
