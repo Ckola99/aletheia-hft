@@ -25,9 +25,12 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
@@ -38,14 +41,28 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * It listens for closed candles from the CandleAggregator, maintains rolling
  * in-memory buffers of candles per (instrument x timeframe), and whenever a
- * MIN_5 candle closes for a traded instrument it runs exactly the same
+ * LTF candle closes for a traded instrument it runs exactly the same
  * evaluation the backtest does:
  *
  * 1. Build USDX bias (multi-timeframe structure)
- * 2. Check SMT divergence between the traded pair and its partner
+ * 2. Check SMT divergence between the traded pair and its EXPLICIT partner
  * 3. Determine killzone and news blackout
  * 4. SignalAggregator.evaluate(context)
  * 5. On a signal -> OrderManager.createOrder -> BrokerExecutor.placeLimitOrder
+ *
+ * INSTRUMENT ROLES:
+ *
+ * - TRADE SET (trading.instruments): instruments we take positions on.
+ * Only these trigger evaluation and order placement.
+ *
+ * - SMT-PARTNER-ONLY SET (trading.smt-partners): instruments streamed and
+ * buffered SOLELY so a traded instrument can compute SMT divergence against
+ * them. They are NEVER evaluated for their own trades. Example: NZD_USD is
+ * streamed as AUD_USD's SMT partner, but we never trade NZD_USD directly.
+ *
+ * - SMT PAIRINGS (trading.smt-pairs): explicit "TRADED:PARTNER" mappings.
+ * A traded instrument with no mapping trades WITHOUT SMT (grade A only) —
+ * e.g. USD_JPY, which has no correlated partner in our set.
  *
  * DESIGN NOTES:
  *
@@ -59,20 +76,11 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * - IN-MEMORY BUFFERS + WARMUP. Rather than re-querying the DB on every candle
  * (and racing the persistence writer), we keep bounded rolling buffers and
- * warm them up once at startup from the CandleRepository. If the DB is empty
- * on a fresh install, the service simply won't trade until enough live candles
- * accrue -- which is safe.
+ * warm them up once at startup from the CandleRepository.
  *
  * - BROKER-AGNOSTIC. This service depends only on BrokerExecutor, not any
- * concrete broker. Swapping OANDA for a cTrader FIX executor (or any future
- * broker) requires no change here — only the wiring in TradingEngineConfig.
- *
- * - USDX BIAS SOURCE. For now the dollar bias is derived synthetically from the
- * EUR/USD inverse (same method the early backtests used). This is a KNOWN
- * LIMITATION: real DXY produced far better results in tuning. Replacing this
- * with a streamed/fetched DOLLAR_IDX feed is the single highest-value upgrade
- * before this goes beyond paper trading. The bias computation is isolated in
- * buildUsdxBias() so it can be swapped without touching the rest of the loop.
+ * concrete broker. Swapping brokers requires no change here — only the wiring
+ * in TradingEngineConfig.
  */
 @Component
 public class LiveSignalService implements CandleListener {
@@ -109,9 +117,14 @@ public class LiveSignalService implements CandleListener {
 	private final Executor evaluationExecutor;
 
 	// ── Config ─────────────────────────────────────────────────────────
-	private final String[] instruments;
+	private final String[] instruments; // TRADE set
 	private final String usdxSource; // instrument used to derive USDX bias
-	private final double defaultBalance; // fallback if OANDA balance unavailable
+	private final double defaultBalance; // fallback if balance unavailable
+
+	// Explicit SMT pairings: traded instrument -> correlated partner
+	private final Map<String, String> smtPartnerMap = new HashMap<>();
+	// Instruments streamed/buffered only as SMT partners (never traded)
+	private final Set<String> partnerOnlyInstruments = new HashSet<>();
 
 	// ── Rolling candle buffers, keyed "INSTRUMENT:TIMEFRAME" ────────────
 	private final Map<String, Deque<Candle>> buffers = new ConcurrentHashMap<>();
@@ -141,12 +154,15 @@ public class LiveSignalService implements CandleListener {
 			@Value("${trading.htf-timeframe:HOUR_1}") String htfName,
 			@Value("${trading.ltf-timeframe:MIN_5}") String ltfName,
 			@Value("${trading.usdx-source:EUR_USD}") String usdxSource,
-			@Value("${trading.default-balance:100000}") double defaultBalance) {
+			@Value("${trading.default-balance:100000}") double defaultBalance,
+			@Value("${trading.smt-pairs:}") String[] smtPairsRaw,
+			@Value("${trading.smt-partners:}") String[] smtPartners) {
 
 		this(aggregator, candleRepository, signalAggregator, usdxBiasEngine,
 				killzoneService, calendarService, smtRegistry, smtDetector,
 				orderManager, executor, killSwitch, dxyFeed, instruments,
 				htfName, ltfName, usdxSource, defaultBalance,
+				smtPairsRaw, smtPartners,
 				Executors.newSingleThreadExecutor(r -> {
 					Thread t = new Thread(r, "live-signal-eval");
 					t.setDaemon(true);
@@ -172,6 +188,8 @@ public class LiveSignalService implements CandleListener {
 			String ltfName,
 			String usdxSource,
 			double defaultBalance,
+			String[] smtPairsRaw,
+			String[] smtPartners,
 			Executor evaluationExecutor) {
 
 		this.aggregator = aggregator;
@@ -192,6 +210,25 @@ public class LiveSignalService implements CandleListener {
 		this.htf = Timeframe.valueOf(htfName);
 		this.ltf = Timeframe.valueOf(ltfName);
 		this.evaluationExecutor = evaluationExecutor;
+
+		// Parse explicit SMT pairings "TRADED:PARTNER"
+		if (smtPairsRaw != null) {
+			for (String pair : smtPairsRaw) {
+				if (pair == null || pair.isBlank())
+					continue;
+				String[] parts = pair.split(":");
+				if (parts.length == 2) {
+					smtPartnerMap.put(parts[0].trim(), parts[1].trim());
+				}
+			}
+		}
+		// Parse partner-only instruments (streamed but never traded)
+		if (smtPartners != null) {
+			for (String p : smtPartners) {
+				if (p != null && !p.isBlank())
+					partnerOnlyInstruments.add(p.trim());
+			}
+		}
 	}
 
 	/**
@@ -202,8 +239,11 @@ public class LiveSignalService implements CandleListener {
 		aggregator.addCandleListener(this);
 		warmup();
 		System.out.println("[LiveSignalService] Active. HTF=" + htf
-				+ " LTF=" + ltf + " instruments=" + String.join(",", instruments)
-				+ " (USDX bias source: " + usdxSource + ", synthetic)");
+				+ " LTF=" + ltf
+				+ " | trade=" + String.join(",", instruments)
+				+ " | smt-partners=" + String.join(",", partnerOnlyInstruments)
+				+ " | smt-pairs=" + smtPartnerMap
+				+ " (USDX bias source: " + usdxSource + ")");
 	}
 
 	/**
@@ -243,6 +283,7 @@ public class LiveSignalService implements CandleListener {
 		candleEvents.incrementAndGet();
 
 		// Buffer every timeframe we track, for every instrument we care about
+		// (trade set + USDX source + SMT-partner-only instruments)
 		if (isBufferable(candle)) {
 			synchronized (bufferLock) {
 				Deque<Candle> buf = buffers.computeIfAbsent(
@@ -253,7 +294,9 @@ public class LiveSignalService implements CandleListener {
 			}
 		}
 
-		// Only a closed LTF candle on a TRADED instrument triggers evaluation
+		// Only a closed LTF candle on a TRADED instrument triggers evaluation.
+		// SMT-partner-only instruments (e.g. NZD_USD) are buffered above but
+		// never evaluated here — that's what makes them partner-only.
 		if (candle.timeframe() != ltf)
 			return;
 		if (!isTradedInstrument(candle.instrument()))
@@ -290,10 +333,10 @@ public class LiveSignalService implements CandleListener {
 		if (htfCandles.size() < 10 || ltfCandles.size() < 30)
 			return;
 
-		// Pillar 1: USDX bias (synthetic for now — see class notes)
+		// Pillar 1: USDX bias
 		UsdxBias usdxBias = buildUsdxBias(now);
 
-		// SMT divergence between this pair and its partner
+		// SMT divergence between this pair and its EXPLICIT partner (if any)
 		Optional<SmtDivergenceSignal> smt = detectSmt(instrument, killzone);
 
 		// Pillar 3: news blackout
@@ -331,9 +374,9 @@ public class LiveSignalService implements CandleListener {
 	/**
 	 * Builds the multi-timeframe USDX bias.
 	 *
-	 * Preferred path: REAL DXY from DxyFeedService (matches the tuned backtest).
-	 * Until the feed has seeded, we return NEUTRAL (no trades) rather than fall
-	 * back to the inferior synthetic proxy — flat is safer than wrong.
+	 * Preferred path: REAL DXY from DxyFeedService. Until the feed has seeded,
+	 * we return NEUTRAL (no trades) rather than fall back to the inferior
+	 * synthetic proxy — flat is safer than wrong.
 	 *
 	 * Fallback path (only when the DXY feed is disabled): synthetic dollar index
 	 * derived by inverting the EUR/USD candles.
@@ -356,8 +399,9 @@ public class LiveSignalService implements CandleListener {
 	}
 
 	/**
-	 * Updates the SMT swing registry for this pair and its partner, then checks
-	 * for divergence. Returns empty if there is no configured partner.
+	 * Updates the SMT swing registry for this instrument and its EXPLICIT
+	 * partner, then checks for divergence. Returns empty if this instrument
+	 * has no configured partner (e.g. USD_JPY) — such instruments trade A-only.
 	 */
 	private Optional<SmtDivergenceSignal> detectSmt(String instrument,
 			KillzoneWindow killzone) {
@@ -426,20 +470,28 @@ public class LiveSignalService implements CandleListener {
 		return false;
 	}
 
-	/** Traded instruments plus the USDX source (usually already included). */
+	/**
+	 * Instruments whose candles we buffer: the trade set, the USDX source, and
+	 * the SMT-partner-only instruments (so traded instruments can compute SMT
+	 * against them). Partner-only instruments are buffered but never traded.
+	 */
 	private List<String> instrumentsToBuffer() {
 		List<String> list = new ArrayList<>(List.of(instruments));
 		if (!list.contains(usdxSource))
 			list.add(usdxSource);
+		for (String p : partnerOnlyInstruments) {
+			if (!list.contains(p))
+				list.add(p);
+		}
 		return list;
 	}
 
-	/** The SMT partner is simply the other configured instrument, if any. */
+	/**
+	 * The SMT partner is looked up from the EXPLICIT config pairings.
+	 * Returns null if this instrument has no configured partner (trades A-only).
+	 */
 	private String partnerFor(String instrument) {
-		for (String i : instruments)
-			if (!i.equals(instrument))
-				return i;
-		return null;
+		return smtPartnerMap.get(instrument);
 	}
 
 	private static String key(String instrument, Timeframe tf) {

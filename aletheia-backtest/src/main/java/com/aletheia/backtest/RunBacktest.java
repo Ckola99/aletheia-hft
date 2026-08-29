@@ -7,15 +7,15 @@ public class RunBacktest {
 
 	public static void main(String[] args) {
 
-		LocalDate startDate = LocalDate.of(2024, 1, 1);
-		LocalDate endDate = LocalDate.of(2024, 12, 30);
+		LocalDate startDate = LocalDate.of(2023, 1, 1);
+		LocalDate endDate = LocalDate.of(2023, 12, 30);
 
 		double riskRewardRatio = 3.0;
 		long slBuffer = 20L;
 		int maxOpenTrades = 6;
 		long spread = 15L;
 
-		Path calendarCsv = Path.of("data/calendar_2024.csv");
+		Path calendarCsv = Path.of("data/calendar_2023.csv");
 
 		BacktestRunner runner = new BacktestRunner(
 				riskRewardRatio, slBuffer, maxOpenTrades, spread);

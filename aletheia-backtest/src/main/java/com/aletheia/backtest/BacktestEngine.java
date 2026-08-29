@@ -27,8 +27,14 @@ public class BacktestEngine {
 	private final int maxOpenTrades;
 	private final long spreadScaled;
 
+	// Trade-management parameters — mirror live ManagedOrder rules.
+	private static final double TP1_RISK_MULTIPLE = 2.0; // TP1 at 2R
+	private static final double TP2_RISK_MULTIPLE = 3.0; // TP2 at 3R
+	private static final double TP1_CLOSE_FRACTION = 0.70; // close 70% at TP1
+
 	/**
-	 * @param riskRewardRatio target R:R (e.g. 3.0)
+	 * @param riskRewardRatio target R:R (e.g. 3.0) — retained for the banner;
+	 *                        actual targets now use TP1/TP2 multiples above
 	 * @param slBufferScaled  extra buffer beyond sweep price for SL
 	 * @param maxOpenTrades   max simultaneous positions
 	 * @param spreadScaled    simulated spread in scaled units
@@ -155,7 +161,9 @@ public class BacktestEngine {
 		System.out.println("  HTF candles:   " + htfCandles.size());
 		System.out.println("  LTF candles:   " + ltfCandles.size());
 		System.out.println("  USDX bias:     DYNAMIC");
-		System.out.println("  R:R target:    " + riskRewardRatio);
+		System.out.println("  TP1/TP2:       " + TP1_RISK_MULTIPLE + "R / "
+				+ TP2_RISK_MULTIPLE + "R (" + (int) (TP1_CLOSE_FRACTION * 100)
+				+ "% at TP1)");
 		System.out.println("  Spread:        " + spreadScaled + " scaled units ("
 				+ (spreadScaled / 10.0) + " pips)");
 		System.out.println("  SMT:           " + (smtEnabled ? smtInstrument : "disabled"));
@@ -239,20 +247,22 @@ public class BacktestEngine {
 			TradeSignal s = signal.get();
 			signalsGenerated++;
 
-			long sl, tp;
+			long sl, tp1, tp2;
 			if (s.bias() == MarketBias.BULLISH) {
 				long effectiveEntry = s.idealEntry() + (spreadScaled / 2);
 				sl = s.sweepPrice() - slBufferScaled;
 				long risk = effectiveEntry - sl;
-				tp = effectiveEntry + (long) (risk * riskRewardRatio);
+				tp1 = effectiveEntry + (long) (risk * TP1_RISK_MULTIPLE);
+				tp2 = effectiveEntry + (long) (risk * TP2_RISK_MULTIPLE);
 			} else {
 				long effectiveEntry = s.idealEntry() - (spreadScaled / 2);
 				sl = s.sweepPrice() + slBufferScaled;
 				long risk = sl - effectiveEntry;
-				tp = effectiveEntry - (long) (risk * riskRewardRatio);
+				tp1 = effectiveEntry - (long) (risk * TP1_RISK_MULTIPLE);
+				tp2 = effectiveEntry - (long) (risk * TP2_RISK_MULTIPLE);
 			}
 
-			SimulatedTrade trade = new SimulatedTrade(s, sl, tp);
+			SimulatedTrade trade = new SimulatedTrade(s, sl, tp1, tp2, TP1_CLOSE_FRACTION);
 			openTrades.add(trade);
 			allTrades.add(trade);
 
@@ -296,7 +306,9 @@ public class BacktestEngine {
 		System.out.println("  HTF candles:   " + htfCandles.size());
 		System.out.println("  LTF candles:   " + ltfCandles.size());
 		System.out.println("  USDX bias:     " + (dynamicBias ? "DYNAMIC" : "FIXED " + fixedBias.direction()));
-		System.out.println("  R:R target:    " + riskRewardRatio);
+		System.out.println("  TP1/TP2:       " + TP1_RISK_MULTIPLE + "R / "
+				+ TP2_RISK_MULTIPLE + "R (" + (int) (TP1_CLOSE_FRACTION * 100)
+				+ "% at TP1)");
 		System.out.println("  Spread:        " + spreadScaled + " scaled units ("
 				+ (spreadScaled / 10.0) + " pips)");
 		System.out.println("  SMT signal:    " + (smt.isPresent() ? smt.get().type() : "none"));
@@ -305,7 +317,7 @@ public class BacktestEngine {
 
 		int warmupPeriod = 30;
 		int cooldownBars = 0; // bars remaining before next trade allowed
-		int cooldownPeriod = 24; // wait 30 LTF candles after opening a trade
+		int cooldownPeriod = 24; // wait N LTF candles after opening a trade
 
 		for (int i = warmupPeriod; i < ltfCandles.size(); i++) {
 			Candle currentCandle = ltfCandles.get(i);
@@ -381,27 +393,29 @@ public class BacktestEngine {
 			TradeSignal s = signal.get();
 			signalsGenerated++;
 
-			// Calculate SL and TP with spread applied
-			long sl, tp;
+			// Calculate SL, TP1, TP2 with spread applied
+			long sl, tp1, tp2;
 			if (s.bias() == MarketBias.BULLISH) {
 				// Long: enter at ask (ideal entry + half spread)
 				long effectiveEntry = s.idealEntry() + (spreadScaled / 2);
 				sl = s.sweepPrice() - slBufferScaled;
 				long risk = effectiveEntry - sl;
-				tp = effectiveEntry + (long) (risk * riskRewardRatio);
+				tp1 = effectiveEntry + (long) (risk * TP1_RISK_MULTIPLE);
+				tp2 = effectiveEntry + (long) (risk * TP2_RISK_MULTIPLE);
 			} else {
 				// Short: enter at bid (ideal entry - half spread)
 				long effectiveEntry = s.idealEntry() - (spreadScaled / 2);
 				sl = s.sweepPrice() + slBufferScaled;
 				long risk = sl - effectiveEntry;
-				tp = effectiveEntry - (long) (risk * riskRewardRatio);
+				tp1 = effectiveEntry - (long) (risk * TP1_RISK_MULTIPLE);
+				tp2 = effectiveEntry - (long) (risk * TP2_RISK_MULTIPLE);
 			}
 
-			SimulatedTrade trade = new SimulatedTrade(s, sl, tp);
+			SimulatedTrade trade = new SimulatedTrade(s, sl, tp1, tp2, TP1_CLOSE_FRACTION);
 			openTrades.add(trade);
 			allTrades.add(trade);
 
-			// Start cooldown — don't open another trade for 50 candles
+			// Start cooldown — don't open another trade for N candles
 			cooldownBars = cooldownPeriod;
 		}
 

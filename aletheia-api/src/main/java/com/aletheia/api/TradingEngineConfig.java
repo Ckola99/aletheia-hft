@@ -209,25 +209,26 @@ public class TradingEngineConfig {
 			CandleAggregator candleAggregator,
 			TickRepository tickRepository,
 			CandleRepository candleRepository,
-			@Value("${trading.instruments}") String[] instruments) {
+			@Value("${trading.instruments}") String[] instruments,
+			@Value("${trading.smt-partners:}") String[] smtPartners) {
 
-		// Create the stream
-		OandaPricingStream stream = new OandaPricingStream(oandaConfig, instruments);
+		java.util.LinkedHashSet<String> streamSet = new java.util.LinkedHashSet<>(
+				java.util.Arrays.asList(instruments));
+		for (String p : smtPartners) {
+			if (p != null && !p.isBlank())
+				streamSet.add(p.trim());
+		}
+		String[] streamInstruments = streamSet.toArray(new String[0]);
 
-		// Wire: stream → aggregator (ticks become candles)
+		OandaPricingStream stream = new OandaPricingStream(oandaConfig, streamInstruments);
 		stream.addListener(candleAggregator);
-
-		// Wire: stream → tick repository (ticks saved to database)
 		stream.addListener(tickRepository);
-
-		// Wire: aggregator → candle repository (closed candles saved to database)
 		candleAggregator.addCandleListener(candleRepository);
 
-		// Log what we connected
 		System.out.println("[TradingEngineConfig] Pipeline wired:");
-		System.out.println("  Stream → CandleAggregator → CandleRepository");
-		System.out.println("  Stream → TickRepository (batch size: " + tickRepository + ")");
-		System.out.println("  Instruments: " + String.join(", ", instruments));
+		System.out.println("  Trading instruments: " + String.join(", ", instruments));
+		System.out.println("  SMT-partner (stream-only): " + String.join(", ", smtPartners));
+		System.out.println("  Full stream set: " + String.join(", ", streamInstruments));
 
 		return stream;
 	}

@@ -5,160 +5,251 @@ import com.aletheia.core.MarketBias;
 import com.aletheia.core.PriceScale;
 import com.aletheia.strategy.SignalGrade;
 import com.aletheia.strategy.TradeSignal;
-import com.aletheia.core.KillzoneWindow;
 
 import java.time.Instant;
 
 /**
- * A single simulated trade in the backtest.
+ * A single simulated trade in the backtest, with partial-take-profit and
+ * breakeven trade management that mirrors the live rules documented in
+ * execution.ManagedOrder.
  *
- * Tracks the full lifecycle: entry → stop loss or take profit → exit.
- * Mutable because the trade updates as price moves — the exit
- * fields are null until the trade closes.
+ * TRADE MANAGEMENT MODEL (matches live ManagedOrder):
  *
- * After the backtest completes, all trades are collected into the
- * BacktestResult for performance analysis.
+ * TP1 at {@code tp1RiskMultiple}R (e.g. 2R):
+ * - close {@code tp1CloseFraction} of the position (e.g. 70%)
+ * - move the stop to breakeven (entry) on the remainder
+ * TP2 at {@code tp2RiskMultiple}R (e.g. 3R):
+ * - close the runner (the remaining 30%)
+ * Stop loss:
+ * - before TP1: full position exits at -1R
+ * - after TP1: runner exits at breakeven (0 on the runner)
+ *
+ * FOUR OUTCOMES (with 70/30 at 2R/3R):
+ * - Full loss : SL before TP1 -> -1.0R
+ * - Breakeven scratch : TP1 hit, runner stopped at BE -> +1.4R
+ * - Full win : TP1 hit, runner reaches TP2 -> +2.3R
+ *
+ * CONSERVATIVE AMBIGUITY RULE:
+ * Within a single candle we only see high/low, not the path. If a candle's
+ * range spans BOTH a profit target AND the active stop, we cannot know which
+ * was touched first. We assume the WORSE outcome (stop first) so the backtest
+ * never flatters itself. At 5m/15m timeframes this is rare, but it keeps the
+ * numbers honest.
+ *
+ * P&L ACCOUNTING:
+ * P&L is tracked as a fraction-weighted R multiple across the legs, then
+ * converted to pips for reporting so results stay comparable to the old
+ * single-TP runs. "Pips" here means: (weighted R) * (risk distance in pips).
  */
 public class SimulatedTrade {
 
 	private final String instrument;
 	private final MarketBias direction;
 	private final long entryPrice;
-	private final long stopLoss;
-	private final long takeProfit;
+	private final long initialStop; // original protective stop
+	private final long tp1; // first target (partial close)
+	private final long tp2; // second target (runner)
+	private final long riskDistance; // |entry - initialStop| in scaled units
 	private final Instant entryTime;
 	private final SignalGrade grade;
 	private final KillzoneWindow killzone;
 
-	// These are set when the trade exits
-	private Long exitPrice;
-	private Instant exitTime;
-	private boolean stopped; // true if hit SL, false if hit TP
+	private final double tp1CloseFraction; // e.g. 0.70
 
-	public SimulatedTrade(TradeSignal signal, long stopLoss, long takeProfit) {
+	// ── Mutable lifecycle state ────────────────────────────────────────
+	private boolean tp1Hit = false; // has the partial closed?
+	private long currentStop; // moves to breakeven after TP1
+	private boolean closed = false; // fully closed?
+	private Instant exitTime;
+	private Long exitPrice; // representative exit (last leg) for logging
+
+	// Realised R, weighted by the fraction of the position each leg closed.
+	private double realisedR = 0.0;
+
+	/**
+	 * @param signal           the triggering signal (entry, bias, instrument)
+	 * @param initialStop      protective stop (sweep +/- buffer), scaled long
+	 * @param tp1              first target price (scaled long)
+	 * @param tp2              second/runner target price (scaled long)
+	 * @param tp1CloseFraction fraction closed at TP1 (e.g. 0.70)
+	 */
+	public SimulatedTrade(TradeSignal signal, long initialStop,
+			long tp1, long tp2, double tp1CloseFraction) {
 		this.instrument = signal.instrument();
 		this.direction = signal.bias();
 		this.entryPrice = signal.idealEntry();
-		this.stopLoss = stopLoss;
-		this.takeProfit = takeProfit;
+		this.initialStop = initialStop;
+		this.tp1 = tp1;
+		this.tp2 = tp2;
+		this.riskDistance = Math.abs(signal.idealEntry() - initialStop);
 		this.entryTime = signal.generatedAt();
 		this.grade = signal.grade();
 		this.killzone = signal.killzone();
+		this.tp1CloseFraction = tp1CloseFraction;
+		this.currentStop = initialStop;
 	}
 
 	/**
-	 * Checks if the given price triggers stop loss or take profit.
+	 * Advance the trade against one candle's high/low.
 	 *
-	 * For a BULLISH trade (long):
-	 * - Price drops to or below stopLoss → stopped out (loss)
-	 * - Price rises to or above takeProfit → target hit (win)
-	 *
-	 * For a BEARISH trade (short):
-	 * - Price rises to or above stopLoss → stopped out (loss)
-	 * - Price drops to or below takeProfit → target hit (win)
-	 *
-	 * @param high the candle's high price (scaled long)
-	 * @param low  the candle's low price (scaled long)
-	 * @param time when this candle closed
-	 * @return true if the trade was closed by this candle
+	 * Processes at most the events that could occur this candle, applying the
+	 * conservative stop-first rule when a candle spans both a target and the
+	 * active stop. Returns true when the trade becomes fully closed.
 	 */
-
 	public boolean checkExit(long high, long low, Instant time) {
-		if (isOpen()) {
-			if (direction == MarketBias.BULLISH) {
-				// Long: SL hit if low touches or breaks below stopLoss
-				if (low <= stopLoss) {
-					close(stopLoss, time, true);
-					return true;
-				}
-				// Long: TP hit if high touches or breaks above takeProfit
-				if (high >= takeProfit) {
-					close(takeProfit, time, false);
-					return true;
-				}
+		if (closed) {
+			return false;
+		}
+
+		boolean bullish = (direction == MarketBias.BULLISH);
+
+		// Determine what this candle touched, relative to the ACTIVE stop.
+		boolean stopTouched = bullish ? (low <= currentStop) : (high >= currentStop);
+		boolean tp1Touched = !tp1Hit && (bullish ? (high >= tp1) : (low <= tp1));
+		boolean tp2Touched = tp1Hit && (bullish ? (high >= tp2) : (low <= tp2));
+
+		// ── Phase 1: position still whole (TP1 not yet hit) ────────────
+		if (!tp1Hit) {
+			if (stopTouched && tp1Touched) {
+				// Ambiguous: candle spans both TP1 and the stop.
+				// Conservative rule -> assume stop hit first: full -1R loss.
+				closeFully(currentStop, time, -1.0);
+				return true;
+			}
+			if (stopTouched) {
+				// Clean full stop before any partial: -1R on whole position.
+				closeFully(currentStop, time, -1.0);
+				return true;
+			}
+			if (tp1Touched) {
+				// Partial close at TP1: bank the closed fraction at its R,
+				// then move stop to breakeven for the runner.
+				double tp1R = rMultipleAt(tp1); // e.g. +2.0
+				realisedR += tp1CloseFraction * tp1R; // e.g. 0.70 * 2 = 1.4
+				tp1Hit = true;
+				currentStop = entryPrice; // breakeven
+				// Do NOT return — the SAME candle might also reach TP2 or the
+				// (new) breakeven stop. Fall through to phase 2 below.
 			} else {
-				// Short: SL hit if high touches or breaks above stopLoss
-				if (high >= stopLoss) {
-					close(stopLoss, time, true);
-					return true;
-				}
-				// Short: TP hit if low touches or breaks below takeProfit
-				if (low <= takeProfit) {
-					close(takeProfit, time, false);
-					return true;
-				}
+				// Nothing happened this candle.
+				return false;
 			}
 		}
+
+		// ── Phase 2: runner active (TP1 already hit, stop at breakeven) ─
+		// Recompute touches against the runner's world for THIS candle.
+		boolean runnerStopTouched = bullish ? (low <= currentStop) : (high >= currentStop);
+		boolean runnerTp2Touched = bullish ? (high >= tp2) : (low <= tp2);
+
+		if (runnerStopTouched && runnerTp2Touched) {
+			// Ambiguous on the runner: assume breakeven stop first (0 on runner).
+			double runnerFraction = 1.0 - tp1CloseFraction;
+			realisedR += runnerFraction * 0.0; // breakeven, adds 0
+			closeFully(currentStop, time, realisedR);
+			return true;
+		}
+		if (runnerTp2Touched) {
+			double runnerFraction = 1.0 - tp1CloseFraction;
+			double tp2R = rMultipleAt(tp2); // e.g. +3.0
+			realisedR += runnerFraction * tp2R; // e.g. 0.30 * 3 = 0.9
+			closeFully(tp2, time, realisedR);
+			return true;
+		}
+		if (runnerStopTouched) {
+			// Runner stopped at breakeven: contributes 0. Trade done.
+			closeFully(currentStop, time, realisedR);
+			return true;
+		}
+
+		// Runner still open, TP1 already banked. Not fully closed yet.
 		return false;
 	}
 
-	private void close(long price, Instant time, boolean wasStopped) {
+	/**
+	 * The signed R multiple achieved if the position closed at {@code price},
+	 * relative to entry and the ORIGINAL risk distance.
+	 */
+	private double rMultipleAt(long price) {
+		if (riskDistance == 0) {
+			return 0.0;
+		}
+		long move = (direction == MarketBias.BULLISH)
+				? (price - entryPrice)
+				: (entryPrice - price);
+		return (double) move / (double) riskDistance;
+	}
+
+	private void closeFully(long price, Instant time, double totalR) {
+		this.closed = true;
 		this.exitPrice = price;
 		this.exitTime = time;
-		this.stopped = wasStopped;
+		this.realisedR = totalR;
 	}
 
+	// ── P&L / reporting ────────────────────────────────────────────────
+
 	/**
-	 * P&L in scaled price units (not pips, not dollars).
-	 * For BULLISH: exit - entry (positive if price went up)
-	 * For BEARISH: entry - exit (positive if price went down)
+	 * Total realised R for the whole trade (fraction-weighted across legs).
+	 * e.g. full win = +2.3R, breakeven scratch = +1.4R, full loss = -1.0R.
 	 */
-	public long pnlScaled() {
-		if (!isClosed())
-			return 0;
-		if (direction == MarketBias.BULLISH) {
-			return exitPrice - entryPrice;
-		} else {
-			return entryPrice - exitPrice;
-		}
+	public double realisedR() {
+		return realisedR;
 	}
 
 	/**
-	 * P&L in pips.
-	 * One pip for EUR/USD = 10 scaled units (see PriceScale.onePip).
+	 * P&L in pips: realised R multiplied by the risk distance expressed in pips.
+	 * This keeps the reported unit ("pips") consistent with earlier single-TP
+	 * runs while correctly accounting for the partial-close weighting.
 	 */
 	public double pnlPips() {
+		if (!closed) {
+			return 0.0;
+		}
 		long pip = PriceScale.onePip(instrument);
-		return (double) pnlScaled() / pip;
+		double riskPips = (double) riskDistance / pip;
+		return realisedR * riskPips;
 	}
 
 	/**
-	 * Risk in scaled units: distance from entry to stop loss.
+	 * P&L in scaled price units, reconstructed from realised R and risk.
+	 * Provided for compatibility with any callers expecting a scaled figure.
 	 */
-	public long riskScaled() {
-		return Math.abs(entryPrice - stopLoss);
-	}
-
-	/**
-	 * Reward-to-Risk ratio achieved by this trade.
-	 * Positive for winners, negative for losers.
-	 */
-	public double rewardRiskRatio() {
-		long risk = riskScaled();
-		if (risk == 0)
+	public long pnlScaled() {
+		if (!closed) {
 			return 0;
-		return (double) pnlScaled() / risk;
+		}
+		return Math.round(realisedR * riskDistance);
 	}
+
+	public double rewardRiskRatio() {
+		return realisedR; // realised R IS the reward-to-risk achieved
+	}
+
+	// ── State queries ──────────────────────────────────────────────────
 
 	public boolean isOpen() {
-		return exitPrice == null;
+		return !closed;
 	}
 
 	public boolean isClosed() {
-		return exitPrice != null;
+		return closed;
 	}
 
+	/** A win is any net-positive realised R (includes breakeven scratches). */
 	public boolean isWin() {
-		return isClosed() && pnlScaled() > 0;
+		return closed && realisedR > 0.0;
 	}
 
 	public boolean isLoss() {
-		return isClosed() && pnlScaled() < 0;
+		return closed && realisedR < 0.0;
 	}
 
-	public boolean wasStopped() {
-		return stopped;
+	/** True if the partial at TP1 was reached (useful for stats). */
+	public boolean reachedTp1() {
+		return tp1Hit;
 	}
+
+	// ── Getters ────────────────────────────────────────────────────────
 
 	public String instrument() {
 		return instrument;
@@ -173,11 +264,19 @@ public class SimulatedTrade {
 	}
 
 	public long stopLoss() {
-		return stopLoss;
+		return initialStop;
 	}
 
-	public long takeProfit() {
-		return takeProfit;
+	public long currentStop() {
+		return currentStop;
+	}
+
+	public long tp1() {
+		return tp1;
+	}
+
+	public long tp2() {
+		return tp2;
 	}
 
 	public Instant entryTime() {
