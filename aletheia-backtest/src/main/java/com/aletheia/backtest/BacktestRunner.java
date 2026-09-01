@@ -7,10 +7,12 @@ import com.aletheia.core.Tick;
 import com.aletheia.core.Timeframe;
 import com.aletheia.data.DukascopyHistoryLoader;
 import com.aletheia.data.TickRepository;
-import com.aletheia.strategy.SmtDivergenceDetector;
-import com.aletheia.strategy.SmtDivergenceSignal;
-import com.aletheia.strategy.SmtPair;
-import com.aletheia.strategy.SwingPointRegistry;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.time.Instant;
+import java.time.LocalDate;
 
 import java.nio.file.Path;
 import java.time.LocalDate;
@@ -66,11 +68,13 @@ public class BacktestRunner {
 
 		primaryBuilder.summary().forEach((tf, count) -> System.out.println("  " + tf + ": " + count));
 
-		List<Candle> htfCandles = primaryBuilder.getCandles(instrument, Timeframe.HOUR_4);
-		List<Candle> ltfCandles = primaryBuilder.getCandles(instrument, Timeframe.MIN_15);
+		Timeframe htf = Timeframe.HOUR_1;
+		Timeframe ltf = Timeframe.MIN_5;
+		List<Candle> htfCandles = primaryBuilder.getCandles(instrument, htf);
+		List<Candle> ltfCandles = primaryBuilder.getCandles(instrument, ltf);
 
-		System.out.println("  HTF (HOUR_1): " + htfCandles.size() + " candles");
-		System.out.println("  LTF (MIN_1):  " + ltfCandles.size() + " candles");
+		System.out.println("  HTF (" + htf.displayName() + "): " + htfCandles.size() + " candles");
+		System.out.println("  LTF (" + ltf.displayName() + "): " + ltfCandles.size() + " candles");
 
 		if (htfCandles.size() < 30 || ltfCandles.size() < 50) {
 			System.out.println("  Insufficient candles for backtest. Aborting.");
@@ -129,48 +133,14 @@ public class BacktestRunner {
 			usdxDailyProxy = SyntheticUsdxBuilder.fromEurUsd(eurHour1);
 		}
 
-		// -- Step 4: Check SMT Divergence -------------------------------
-		Optional<SmtDivergenceSignal> smtSignal = Optional.empty();
-
+		// -- Step 4: Extract SMT partner candles (SMT now computed per-candle
+		// inside the engine, mirroring live — no precompute, no look-ahead)
+		List<Candle> selfMin15 = primaryBuilder.getCandles(instrument, Timeframe.MIN_15);
+		List<Candle> smtPartnerMin15 = null;
 		if (smtBuilder != null) {
-			System.out.println("\n-- Step 4: Checking SMT Divergence ----------------------");
-			SwingPointRegistry smtRegistry = new SwingPointRegistry(3, 50);
-			SmtDivergenceDetector smtDetector = new SmtDivergenceDetector();
-
-			List<Candle> primaryMin15 = primaryBuilder.getCandles(instrument, Timeframe.MIN_15);
-			List<Candle> smtMin15 = smtBuilder.getCandles(smtInstrument, Timeframe.MIN_15);
-
-			smtRegistry.update(instrument, Timeframe.MIN_15, primaryMin15);
-			smtRegistry.update(smtInstrument, Timeframe.MIN_15, smtMin15);
-
-			System.out.println("  " + instrument + " swings: "
-					+ smtRegistry.getSwings(instrument, Timeframe.MIN_15).size());
-			System.out.println("  " + smtInstrument + " swings: "
-					+ smtRegistry.getSwings(smtInstrument, Timeframe.MIN_15).size());
-
-			smtSignal = smtDetector.detect(
-					new SmtPair(instrument, smtInstrument),
-					Timeframe.MIN_15,
-					smtRegistry,
-					com.aletheia.core.KillzoneWindow.LONDON_OPEN);
-
-			if (smtSignal.isEmpty()) {
-				smtSignal = smtDetector.detect(
-						new SmtPair(instrument, smtInstrument),
-						Timeframe.MIN_15,
-						smtRegistry,
-						com.aletheia.core.KillzoneWindow.NEW_YORK_OPEN);
-			}
-
-			if (smtSignal.isPresent()) {
-				System.out.println("  SMT Divergence FOUND: " + smtSignal.get().type());
-			} else {
-				System.out.println("  No SMT divergence detected");
-			}
-
-			// Free SMT builder memory — we only needed it for swing detection
-			smtBuilder = null;
-			System.gc();
+			System.out.println("\n-- Step 4: SMT partner = " + smtInstrument
+					+ " (per-candle divergence) ----------");
+			smtPartnerMin15 = smtBuilder.getCandles(smtInstrument, Timeframe.MIN_15);
 		} else {
 			System.out.println("\n-- Step 4: SMT disabled ---------------------------------");
 		}
@@ -199,14 +169,16 @@ public class BacktestRunner {
 
 		// -- Step 6: Run the backtest -----------------------------------
 		System.out.println("\n-- Step 6: Running backtest ------------------------------");
-		BacktestResult result = engine.run(
+		BacktestResult result = engine.runWithLiveSmt(
 				instrument,
 				htfCandles,
 				ltfCandles,
 				usdxMonthlyProxy,
 				usdxWeeklyProxy,
 				usdxDailyProxy,
-				smtSignal);
+				smtInstrument,
+				selfMin15,
+				smtPartnerMin15);
 
 		System.out.println("\n");
 		result.printReport();
@@ -228,22 +200,40 @@ public class BacktestRunner {
 	 * ticks
 	 * We do: download ticks → aggregate on the fly → only candles remain
 	 */
+	private static final Path CACHE_DIR = Path.of("data/cache");
+
 	private HistoricalCandleBuilder downloadAndAggregate(String instrument,
 			LocalDate startDate,
 			LocalDate endDate) {
 
-		// Cache key includes the date range, since DXY is fetched with a
-		// different (wider) range than the FX pairs -- reusing a narrower
-		// cached range for a wider request would silently under-serve data.
 		String cacheKey = instrument + "|" + startDate + "|" + endDate;
+
+		// 1. In-memory cache (within this run)
 		HistoricalCandleBuilder cached = candleCache.get(cacheKey);
 		if (cached != null) {
-			System.out.println("  Reusing cached candles for " + instrument
-					+ " (" + startDate + " to " + endDate + ") -- "
-					+ cached.totalCandles() + " candles, download skipped");
+			System.out.println("  Reusing in-memory candles for " + instrument
+					+ " (" + startDate + " to " + endDate + ") -- download skipped");
 			return cached;
 		}
 
+		// 2. Disk cache (across runs) — safe for complete past ranges only
+		Path cacheFile = cacheFileFor(instrument, startDate, endDate);
+		boolean recentRange = !endDate.isBefore(LocalDate.now().minusDays(2));
+		if (!recentRange && Files.exists(cacheFile)) {
+			try {
+				HistoricalCandleBuilder builder = loadFromDisk(cacheFile);
+				System.out.println("  Loaded " + builder.totalCandles()
+						+ " candles from DISK cache for " + instrument
+						+ " (" + startDate + " to " + endDate + ") -- download skipped");
+				candleCache.put(cacheKey, builder);
+				return builder;
+			} catch (IOException e) {
+				System.out.println("  Disk cache read failed (" + e.getMessage()
+						+ ") -- falling back to download");
+			}
+		}
+
+		// 3. Cache miss — download + aggregate
 		HistoricalCandleBuilder builder = new HistoricalCandleBuilder();
 
 		TickRepository streamingRepo = new TickRepository(null, 1_000_000) {
@@ -262,7 +252,68 @@ public class BacktestRunner {
 		loader.load(instrument, startDate, endDate);
 
 		System.out.println("  Candles built: " + builder.totalCandles());
+
+		// Write to disk cache for future runs (skip very recent ranges)
+		if (!recentRange && builder.totalCandles() > 0) {
+			try {
+				writeToDisk(cacheFile, builder);
+				System.out.println("  Wrote " + builder.totalCandles()
+						+ " candles to DISK cache: " + cacheFile);
+			} catch (IOException e) {
+				System.out.println("  Disk cache write failed (" + e.getMessage() + ")");
+			}
+		}
+
 		candleCache.put(cacheKey, builder);
+		return builder;
+	}
+
+	private Path cacheFileFor(String instrument, LocalDate start, LocalDate end) {
+		String name = instrument + "_" + start + "_" + end + ".csv";
+		return CACHE_DIR.resolve(name);
+	}
+
+	/** Writes all closed candles to a CSV file (one row per candle). */
+	private void writeToDisk(Path file, HistoricalCandleBuilder builder)
+			throws IOException {
+		Files.createDirectories(file.getParent());
+		try (BufferedWriter w = Files.newBufferedWriter(file)) {
+			w.write("time,instrument,timeframe,open,high,low,close,volume");
+			w.newLine();
+			// Pull every timeframe's candles from the builder
+			for (Timeframe tf : Timeframe.values()) {
+				for (Candle c : builder.getCandles(tf)) {
+					w.write(c.time() + "," + c.instrument() + "," + c.timeframe()
+							+ "," + c.open() + "," + c.high() + "," + c.low()
+							+ "," + c.close() + "," + c.volume());
+					w.newLine();
+				}
+			}
+		}
+	}
+
+	/** Reads candles back from a CSV file into a fresh builder. */
+	private HistoricalCandleBuilder loadFromDisk(Path file) throws IOException {
+		List<Candle> candles = new ArrayList<>();
+		try (BufferedReader r = Files.newBufferedReader(file)) {
+			String line = r.readLine(); // skip header
+			while ((line = r.readLine()) != null) {
+				if (line.isBlank())
+					continue;
+				String[] p = line.split(",");
+				candles.add(new Candle(
+						Instant.parse(p[0]),
+						p[1],
+						Timeframe.valueOf(p[2]),
+						Long.parseLong(p[3]),
+						Long.parseLong(p[4]),
+						Long.parseLong(p[5]),
+						Long.parseLong(p[6]),
+						Long.parseLong(p[7])));
+			}
+		}
+		HistoricalCandleBuilder builder = new HistoricalCandleBuilder();
+		builder.loadCandles(candles);
 		return builder;
 	}
 }

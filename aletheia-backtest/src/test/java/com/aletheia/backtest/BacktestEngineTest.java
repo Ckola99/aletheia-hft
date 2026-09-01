@@ -136,8 +136,8 @@ class BacktestEngineTest {
 	}
 
 	@Test
-	void simulated_trade_tracks_win_correctly() {
-		// Manual trade test: enter long at 108_300, SL at 108_200, TP at 108_500
+	void simulated_trade_tracks_full_win_correctly() {
+		// entry 108_300, SL 108_200 (risk=100). TP1 @ 2R=108_500, TP2 @ 3R=108_600.
 		com.aletheia.strategy.TradeSignal mockSignal = new com.aletheia.strategy.TradeSignal(
 				MarketBias.BULLISH, "EUR_USD",
 				new com.aletheia.strategy.FairValueGap(
@@ -164,26 +164,35 @@ class BacktestEngineTest {
 				java.util.Optional.empty(),
 				Instant.now());
 
-		SimulatedTrade trade = new SimulatedTrade(mockSignal, 108_200L, 108_500L);
+		// SL=108_200, TP1=108_500, TP2=108_600, close 70% at TP1
+		SimulatedTrade trade = new SimulatedTrade(
+				mockSignal, 108_200L, 108_500L, 108_600L, 0.70);
 
 		assertThat(trade.isOpen()).isTrue();
 
-		// Price moves up but doesn't hit TP yet
+		// Price moves up but doesn't reach TP1 yet
 		assertThat(trade.checkExit(108_450L, 108_280L, Instant.now())).isFalse();
 		assertThat(trade.isOpen()).isTrue();
 
-		// Price hits TP
-		assertThat(trade.checkExit(108_520L, 108_400L, Instant.now())).isTrue();
+		// Price reaches TP1 (108_500) — partial close, stop to breakeven,
+		// but trade stays OPEN (runner still live)
+		assertThat(trade.checkExit(108_520L, 108_400L, Instant.now())).isFalse();
+		assertThat(trade.isOpen()).isTrue();
+		assertThat(trade.reachedTp1()).isTrue();
+
+		// Runner reaches TP2 (108_600) — full close
+		assertThat(trade.checkExit(108_620L, 108_550L, Instant.now())).isTrue();
 		assertThat(trade.isClosed()).isTrue();
 		assertThat(trade.isWin()).isTrue();
-		assertThat(trade.pnlScaled()).isEqualTo(108_500L - 108_300L); // 200
 
-		System.out.println("P&L pips: " + trade.pnlPips());
-		System.out.println("R:R: " + trade.rewardRiskRatio());
+		// Full win = 0.70*2R + 0.30*3R = 2.3R
+		assertThat(trade.realisedR()).isCloseTo(2.3, within(0.01));
+
+		System.out.println("Full win R: " + trade.rewardRiskRatio());
 	}
 
 	@Test
-	void simulated_trade_tracks_loss_correctly() {
+	void simulated_trade_breakeven_scratch_after_tp1() {
 		com.aletheia.strategy.TradeSignal mockSignal = new com.aletheia.strategy.TradeSignal(
 				MarketBias.BULLISH, "EUR_USD",
 				new com.aletheia.strategy.FairValueGap(
@@ -210,16 +219,59 @@ class BacktestEngineTest {
 				java.util.Optional.empty(),
 				Instant.now());
 
-		SimulatedTrade trade = new SimulatedTrade(mockSignal, 108_200L, 108_500L);
+		SimulatedTrade trade = new SimulatedTrade(
+				mockSignal, 108_200L, 108_500L, 108_600L, 0.70);
 
-		// Price drops and hits SL
+		// Reach TP1 first (partial + stop to breakeven), stays open
+		assertThat(trade.checkExit(108_500L, 108_400L, Instant.now())).isFalse();
+		assertThat(trade.reachedTp1()).isTrue();
+		assertThat(trade.isOpen()).isTrue();
+
+		// Price falls back to breakeven (entry 108_300) — runner scratched
+		assertThat(trade.checkExit(108_350L, 108_300L, Instant.now())).isTrue();
+		assertThat(trade.isClosed()).isTrue();
+
+		// Only the 70% at 2R counts; runner = 0 → 1.4R total, still a win
+		assertThat(trade.isWin()).isTrue();
+		assertThat(trade.realisedR()).isCloseTo(1.4, within(0.01));
+	}
+
+	@Test
+	void simulated_trade_tracks_full_loss_correctly() {
+		com.aletheia.strategy.TradeSignal mockSignal = new com.aletheia.strategy.TradeSignal(
+				MarketBias.BULLISH, "EUR_USD",
+				new com.aletheia.strategy.FairValueGap(
+						com.aletheia.strategy.PdArray.Bias.BULLISH,
+						108_350L, 108_250L,
+						Instant.now(), Timeframe.SECONDS_5),
+				108_300L, 108_050L,
+				com.aletheia.core.KillzoneWindow.LONDON_OPEN,
+				com.aletheia.strategy.SignalGrade.A,
+				bearishDollar(),
+				new com.aletheia.strategy.JudasSwingSignal(
+						MarketBias.BULLISH, "EUR_USD",
+						new com.aletheia.strategy.FairValueGap(
+								com.aletheia.strategy.PdArray.Bias.BULLISH,
+								108_350L, 108_250L,
+								Instant.now(), Timeframe.SECONDS_5),
+						new com.aletheia.core.SwingPoint(
+								Instant.now(), "EUR_USD",
+								com.aletheia.core.SwingType.LOW, 108_100L,
+								Timeframe.SECONDS_5),
+						108_050L,
+						com.aletheia.core.KillzoneWindow.LONDON_OPEN,
+						com.aletheia.strategy.SignalGrade.A),
+				java.util.Optional.empty(),
+				Instant.now());
+
+		SimulatedTrade trade = new SimulatedTrade(
+				mockSignal, 108_200L, 108_500L, 108_600L, 0.70);
+
+		// Price drops and hits SL before TP1 — full loss
 		assertThat(trade.checkExit(108_280L, 108_190L, Instant.now())).isTrue();
 		assertThat(trade.isClosed()).isTrue();
 		assertThat(trade.isLoss()).isTrue();
-		assertThat(trade.wasStopped()).isTrue();
-		assertThat(trade.pnlScaled()).isEqualTo(108_200L - 108_300L); // -100
-
-		System.out.println("P&L pips: " + trade.pnlPips());
+		assertThat(trade.realisedR()).isCloseTo(-1.0, within(0.01));
 	}
 
 	@Test
@@ -329,17 +381,19 @@ class BacktestEngineTest {
 				java.util.Optional.empty(),
 				Instant.now());
 
-		// Trade 1: Win — entry 108300, TP hit at 108500 → +200
-		SimulatedTrade win = new SimulatedTrade(mockSignal, 108_200L, 108_500L);
-		win.checkExit(108_520L, 108_280L, Instant.now());
+		// Trade 1: full win — TP1 then TP2
+		SimulatedTrade win = new SimulatedTrade(mockSignal, 108_200L, 108_500L, 108_600L, 0.70);
+		win.checkExit(108_520L, 108_400L, Instant.now()); // TP1 (stays open)
+		win.checkExit(108_620L, 108_550L, Instant.now()); // TP2 (full win, 2.3R)
 
-		// Trade 2: Loss — entry 108300, SL hit at 108200 → -100
-		SimulatedTrade loss = new SimulatedTrade(mockSignal, 108_200L, 108_500L);
-		loss.checkExit(108_310L, 108_190L, Instant.now());
+		// Trade 2: full loss — SL before TP1
+		SimulatedTrade loss = new SimulatedTrade(mockSignal, 108_200L, 108_500L, 108_600L, 0.70);
+		loss.checkExit(108_310L, 108_190L, Instant.now()); // -1R
 
-		// Trade 3: Win — entry 108300, TP hit at 108500 → +200
-		SimulatedTrade win2 = new SimulatedTrade(mockSignal, 108_200L, 108_500L);
-		win2.checkExit(108_550L, 108_250L, Instant.now());
+		// Trade 3: full win
+		SimulatedTrade win2 = new SimulatedTrade(mockSignal, 108_200L, 108_500L, 108_600L, 0.70);
+		win2.checkExit(108_520L, 108_400L, Instant.now()); // TP1
+		win2.checkExit(108_620L, 108_550L, Instant.now()); // TP2
 
 		PerformanceMetrics metrics = new PerformanceMetrics(List.of(win, loss, win2));
 

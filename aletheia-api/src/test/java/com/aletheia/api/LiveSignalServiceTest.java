@@ -80,9 +80,12 @@ class LiveSignalServiceTest {
 				om,
 				exec,
 				killSwitch,
+				null,
 				null, // DxyFeedService — not needed for these tests
 				new String[] { "EUR_USD", "GBP_USD" },
 				"HOUR_1", "MIN_5", "EUR_USD", 100_000,
+				new String[] { "EUR_USD:GBP_USD", "GBP_USD:EUR_USD" }, // smt-pairs
+				new String[] {}, // smt-partners (none)
 				Runnable::run // synchronous — evaluate inline
 		);
 	}

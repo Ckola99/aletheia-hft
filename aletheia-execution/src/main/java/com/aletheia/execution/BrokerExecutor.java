@@ -63,4 +63,59 @@ public interface BrokerExecutor {
 	 * @return true if the cancel was accepted.
 	 */
 	boolean cancelOrder(String orderId);
+
+	/**
+	 * Fetches all currently-open trades from the broker.
+	 *
+	 * Each returned trade carries the clientExtensions ID we set at placement
+	 * (our ManagedOrder id), so the caller can match a broker trade back to the
+	 * ManagedOrder that created it — no guessing.
+	 *
+	 * This is a READ-ONLY call: it never modifies any position.
+	 *
+	 * @return list of open-trade snapshots; empty list if none are open or the
+	 *         call fails (never null).
+	 */
+	java.util.List<BrokerTrade> getOpenTrades();
+
+	/**
+	 * A snapshot of an open trade as the broker currently reports it.
+	 *
+	 * @param brokerTradeId the broker's own trade ID — needed for close/modify
+	 *                      calls
+	 * @param clientId      the clientExtensions ID we set at placement (our
+	 *                      ManagedOrder id),
+	 *                      or null if the trade has none
+	 * @param instrument    e.g. "EUR_USD"
+	 * @param currentUnits  signed units still open (shrinks after a partial close;
+	 *                      positive = long, negative = short)
+	 * @param openPrice     the fill price, as a scaled long
+	 */
+	record BrokerTrade(
+			String brokerTradeId,
+			String clientId,
+			String instrument,
+			long currentUnits,
+			long openPrice) {
+	}
+
+	/**
+	 * Fetches the current market price for an instrument.
+	 *
+	 * READ-ONLY. Returns the mid-price as a scaled long, or empty on failure.
+	 *
+	 * @param instrument e.g. "EUR_USD"
+	 */
+	java.util.Optional<Long> getCurrentPrice(String instrument);
+
+	/**
+	 * Fetches the realised profit/loss for a trade, in account home currency
+	 * (e.g. USD). realizedPL accumulates as a trade is partially and then fully
+	 * closed, so this works whether the trade is open, reduced, or closed.
+	 *
+	 * READ-ONLY. Returns empty if the trade can't be fetched.
+	 *
+	 * @param tradeId the broker's trade ID
+	 */
+	java.util.Optional<Double> getRealizedPnl(String tradeId);
 }

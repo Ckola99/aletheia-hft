@@ -1,6 +1,5 @@
 package com.aletheia.api;
 
-import com.aletheia.data.OandaPricingStream;
 import com.aletheia.data.PricingStream;
 import com.aletheia.execution.KillSwitch;
 
@@ -23,7 +22,7 @@ public class HealthController {
 	private final PricingStream pricingStream;
 	private final KillSwitch killSwitch;
 
-	public HealthController(OandaPricingStream pricingStream, KillSwitch killSwitch) {
+	public HealthController(PricingStream pricingStream, KillSwitch killSwitch) {
 		this.pricingStream = pricingStream;
 		this.killSwitch = killSwitch;
 	}

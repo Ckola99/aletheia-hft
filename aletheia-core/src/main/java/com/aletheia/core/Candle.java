@@ -110,7 +110,7 @@ public record Candle(
 	 * A ratio close to 0.0 means mostly wicks — indecision.
 	 * Used to qualify displacement candles in OrderBlockDetector.
 	 */
-	
+
 	public double bodyRatio() {
 		if (totalRange() == 0)
 			return 0.0;
