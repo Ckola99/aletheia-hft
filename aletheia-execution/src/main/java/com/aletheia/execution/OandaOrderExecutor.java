@@ -76,8 +76,9 @@ public class OandaOrderExecutor implements BrokerExecutor{
 		String instrument = order.instrument();
 		String price = formatPrice(order.entryPrice(), instrument);
 		String slPrice = formatPrice(order.currentSl(), instrument);
-		String tpPrice = formatPrice(order.tp1(), instrument);
+		String tpPrice = formatPrice(order.tp2(), instrument);
 
+		String clientId = order.id();
 		String json = """
 				{
 				    "order": {
@@ -86,6 +87,9 @@ public class OandaOrderExecutor implements BrokerExecutor{
 				        "units": "%s",
 				        "price": "%s",
 				        "timeInForce": "GTC",
+				        "clientExtensions": {
+				            "id": "%s"
+				        },
 				        "stopLossOnFill": {
 				            "price": "%s"
 				        },
@@ -94,7 +98,7 @@ public class OandaOrderExecutor implements BrokerExecutor{
 				        }
 				    }
 				}
-				""".formatted(instrument, signedUnits, price, slPrice, tpPrice);
+				""".formatted(instrument, signedUnits, price, clientId, slPrice, tpPrice);
 
 		return executePost("/accounts/" + accountId + "/orders", json)
 				.map(node -> {
@@ -175,6 +179,100 @@ public class OandaOrderExecutor implements BrokerExecutor{
 	public Optional<Double> getAccountBalance() {
 		return executeGet("/accounts/" + accountId + "/summary")
 				.map(node -> node.path("account").path("balance").asDouble());
+	}
+
+	/**
+	 * Fetches all open trades from OANDA, tagged with our clientExtensions IDs.
+	 *
+	 * OANDA endpoint: GET /accounts/{id}/openTrades
+	 * Each trade JSON includes:
+	 * "id" — OANDA's trade ID
+	 * "instrument" — e.g. "EUR_USD"
+	 * "currentUnits" — signed units still open
+	 * "price" — the fill price
+	 * "clientExtensions": { "id": ... } — our ManagedOrder id (if set)
+	 */
+	@Override
+	public java.util.List<BrokerTrade> getOpenTrades() {
+		if (isCircuitOpen()) {
+			return java.util.List.of();
+		}
+
+		java.util.List<BrokerTrade> result = new java.util.ArrayList<>();
+
+		executeGet("/accounts/" + accountId + "/openTrades").ifPresent(root -> {
+			JsonNode trades = root.path("trades");
+			for (JsonNode t : trades) {
+				String brokerTradeId = t.path("id").asText();
+				String instrument = t.path("instrument").asText();
+
+				// currentUnits and price come as strings; parse carefully
+				long currentUnits = parseUnits(t.path("currentUnits").asText());
+				long openPrice = parsePrice(t.path("price").asText(), instrument);
+
+				// clientExtensions may be absent
+				String clientId = null;
+				JsonNode ext = t.path("clientExtensions");
+				if (!ext.isMissingNode()) {
+					clientId = ext.path("id").asText(null);
+				}
+
+				result.add(new BrokerTrade(
+						brokerTradeId, clientId, instrument, currentUnits, openPrice));
+			}
+		});
+
+		return result;
+	}
+
+	/** Parses OANDA's unit string (e.g. "-10000") into a signed long. */
+	private long parseUnits(String units) {
+		try {
+			return Long.parseLong(units.trim());
+		} catch (NumberFormatException e) {
+			return 0L;
+		}
+	}
+
+	/** Parses OANDA's price string (e.g. "1.08300") back into a scaled long. */
+	private long parsePrice(String price, String instrument) {
+		try {
+			double d = Double.parseDouble(price.trim());
+			return PriceScale.toScaled(d, instrument);
+		} catch (NumberFormatException e) {
+			return 0L;
+		}
+	}
+
+	/**
+	 * Fetches the current mid-price for an instrument from OANDA.
+	 *
+	 * OANDA endpoint: GET /accounts/{id}/pricing?instruments=EUR_USD
+	 * Response carries closeoutBid / closeoutAsk; we use their midpoint.
+	 */
+	@Override
+	public java.util.Optional<Long> getCurrentPrice(String instrument) {
+		if (isCircuitOpen()) {
+			return java.util.Optional.empty();
+		}
+
+		String endpoint = "/accounts/" + accountId
+				+ "/pricing?instruments=" + instrument;
+
+		return executeGet(endpoint).flatMap(root -> {
+			JsonNode prices = root.path("prices");
+			if (!prices.isArray() || prices.isEmpty()) {
+				return java.util.Optional.empty();
+			}
+			JsonNode p = prices.get(0);
+			String bid = p.path("closeoutBid").asText(null);
+			String ask = p.path("closeoutAsk").asText(null);
+			if (bid == null || ask == null) {
+				return java.util.Optional.empty();
+			}
+			double mid = (Double.parseDouble(bid) + Double.parseDouble(ask)) / 2.0;
+			return java.util.Optional.of(PriceScale.toScaled(mid, instrument));
+		});
 	}
 
 	/**
