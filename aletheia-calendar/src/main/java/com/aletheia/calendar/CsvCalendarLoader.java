@@ -5,19 +5,16 @@ import com.aletheia.core.ImpactLevel;
 
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 /**
  * Loads economic calendar events from a CSV file.
@@ -28,19 +25,21 @@ import java.util.Locale;
  * 3. You can download calendar data manually, save as CSV, and import it
  * 4. CSV is simple, portable, and easy to validate
  *
- * EXPECTED CSV FORMAT:
+ * SUPPORTED CSV SCHEMAS (auto-detected from the header row):
+ *
+ * SCHEMA A — combined UTC timestamp (what the calendar service emits):
+ * scheduled_time_utc,name,currency,impact,source
+ * 2026-08-07T12:30:00Z,Non-Farm Employment Change,USD,HIGH,FOREX_FACTORY
+ *
+ * SCHEMA B — split date + EST-local time (hand-authored historical files):
  * date,time,currency,impact,event
- * 2023-01-06,08:30,USD,HIGH,Non-Farm Payrolls
- * 2023-01-12,08:30,USD,HIGH,CPI m/m
- * 2023-02-01,14:00,USD,HIGH,FOMC Statement
+ * 2024-01-05,08:30,USD,HIGH,Non-Farm Payrolls
+ * - date: YYYY-MM-DD
+ * - time: HH:mm in America/New_York (EST/EDT) local time
  *
- * - date: YYYY-MM-DD format
- * - time: HH:mm in EST (Eastern US timezone)
- * - currency: 3-letter code (USD, EUR, GBP)
- * - impact: HIGH, MEDIUM, or LOW
- * - event: the event name
- *
- * First line is a header and is skipped.
+ * Both resolve to the same absolute Instant internally. The header line is
+ * inspected once to decide which schema is in play; if it can't be recognised,
+ * we default to Schema B for backward compatibility.
  */
 public class CsvCalendarLoader implements CalendarDataSource {
 
@@ -48,11 +47,14 @@ public class CsvCalendarLoader implements CalendarDataSource {
 	private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 	private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm");
 
+	/** Which column layout a given CSV uses. */
+	private enum Schema {
+		UTC_TIMESTAMP, // scheduled_time_utc,name,currency,impact,source
+		DATE_TIME_EST // date,time,currency,impact,event
+	}
+
 	private final Path csvPath;
 
-	/**
-	 * @param csvPath path to the CSV file
-	 */
 	public CsvCalendarLoader(Path csvPath) {
 		this.csvPath = csvPath;
 	}
@@ -62,7 +64,6 @@ public class CsvCalendarLoader implements CalendarDataSource {
 		try {
 			List<EconomicEvent> allEvents = loadAll();
 
-			// Filter to the requested date range
 			Instant fromInstant = from.atStartOfDay(EST).toInstant();
 			Instant toInstant = to.plusDays(1).atStartOfDay(EST).toInstant();
 
@@ -76,14 +77,12 @@ public class CsvCalendarLoader implements CalendarDataSource {
 		}
 	}
 
-	/**
-	 * Loads all events from the CSV file.
-	 */
 	private List<EconomicEvent> loadAll() throws IOException {
 		List<EconomicEvent> events = new ArrayList<>();
 
 		try (BufferedReader reader = Files.newBufferedReader(csvPath)) {
-			String header = reader.readLine(); // skip header line
+			String header = reader.readLine();
+			Schema schema = detectSchema(header);
 
 			String line;
 			while ((line = reader.readLine()) != null) {
@@ -91,7 +90,7 @@ public class CsvCalendarLoader implements CalendarDataSource {
 				if (line.isEmpty())
 					continue;
 
-				EconomicEvent event = parseLine(line);
+				EconomicEvent event = parseLine(line, schema);
 				if (event != null) {
 					events.add(event);
 				}
@@ -102,12 +101,57 @@ public class CsvCalendarLoader implements CalendarDataSource {
 	}
 
 	/**
-	 * Parses a single CSV line into an EconomicEvent.
-	 *
-	 * Expected format: date,time,currency,impact,event
-	 * Example: 2023-01-06,08:30,USD,HIGH,Non-Farm Payrolls
+	 * Inspects the header row to decide which schema the file uses. Falls back
+	 * to the historical DATE_TIME_EST layout if the header is missing or
+	 * unrecognised, preserving old behaviour.
 	 */
-	private EconomicEvent parseLine(String line) {
+	private Schema detectSchema(String header) {
+		if (header == null) {
+			return Schema.DATE_TIME_EST;
+		}
+		String h = header.toLowerCase();
+		if (h.contains("scheduled_time_utc")) {
+			return Schema.UTC_TIMESTAMP;
+		}
+		return Schema.DATE_TIME_EST;
+	}
+
+	private EconomicEvent parseLine(String line, Schema schema) {
+		return switch (schema) {
+			case UTC_TIMESTAMP -> parseUtcTimestampLine(line);
+			case DATE_TIME_EST -> parseDateTimeEstLine(line);
+		};
+	}
+
+	/**
+	 * SCHEMA A: scheduled_time_utc,name,currency,impact,source
+	 * e.g. 2026-08-07T12:30:00Z,Non-Farm Employment Change,USD,HIGH,FOREX_FACTORY
+	 */
+	private EconomicEvent parseUtcTimestampLine(String line) {
+		try {
+			String[] parts = line.split(",", 5);
+			if (parts.length < 4)
+				return null;
+
+			Instant scheduledTime = Instant.parse(parts[0].trim());
+			String eventName = parts[1].trim();
+			String currency = parts[2].trim().toUpperCase();
+			ImpactLevel impact = parseImpact(parts[3].trim());
+
+			return new EconomicEvent(scheduledTime, currency, eventName, impact);
+
+		} catch (Exception e) {
+			System.err.println("[CsvCalendarLoader] Skipping line (utc schema): " + line
+					+ " — " + e.getMessage());
+			return null;
+		}
+	}
+
+	/**
+	 * SCHEMA B: date,time,currency,impact,event
+	 * e.g. 2024-01-05,08:30,USD,HIGH,Non-Farm Payrolls (time is EST/EDT local)
+	 */
+	private EconomicEvent parseDateTimeEstLine(String line) {
 		try {
 			String[] parts = line.split(",", 5);
 			if (parts.length < 5)
@@ -119,15 +163,14 @@ public class CsvCalendarLoader implements CalendarDataSource {
 			ImpactLevel impact = parseImpact(parts[3].trim());
 			String eventName = parts[4].trim();
 
-			// Parse time and combine with date in EST
-			var time = java.time.LocalTime.parse(timeStr, TIME_FMT);
+			LocalTime time = LocalTime.parse(timeStr, TIME_FMT);
 			ZonedDateTime eventTime = ZonedDateTime.of(date, time, EST);
 			Instant scheduledTime = eventTime.toInstant();
 
 			return new EconomicEvent(scheduledTime, currency, eventName, impact);
 
 		} catch (Exception e) {
-			System.err.println("[CsvCalendarLoader] Skipping line: " + line
+			System.err.println("[CsvCalendarLoader] Skipping line (est schema): " + line
 					+ " — " + e.getMessage());
 			return null;
 		}
