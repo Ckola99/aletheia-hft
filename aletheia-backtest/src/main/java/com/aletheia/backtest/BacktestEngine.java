@@ -297,10 +297,8 @@ public class BacktestEngine {
 
 		List<SimulatedTrade> allTrades = new ArrayList<>();
 		List<SimulatedTrade> openTrades = new ArrayList<>();
-		List<PendingSignal> pendingSignals = new ArrayList<>();
 		int signalsGenerated = 0;
 		int signalsRejected = 0;
-		int signalsExpiredUnfilled = 0;
 
 		System.out.println("=====================================================");
 		System.out.println("  BACKTEST STARTING");
@@ -333,35 +331,6 @@ public class BacktestEngine {
 				}
 			}
 			openTrades.removeAll(toRemove);
-
-			// Check pending limit orders for a fill or expiry, exactly like
-			// OrderExpiryService does live: a resting order only stays valid
-			// for the killzone it was raised in (plus a 3-hour safety cutoff).
-			// This runs regardless of maxOpenTrades/cooldown, same as live
-			// where expiry isn't gated on how many positions are open.
-			List<PendingSignal> stillPending = new ArrayList<>();
-			for (PendingSignal p : pendingSignals) {
-				KillzoneWindow nowZone = killzoneService.classify(currentCandle.time());
-				long ageMs = currentCandle.time().toEpochMilli() - p.generatedAt().toEpochMilli();
-				boolean expired = isPendingExpired(nowZone, p.killzone(), ageMs);
-				boolean touched = isLimitTouched(p.signal().idealEntry(),
-						currentCandle.low(), currentCandle.high());
-
-				if (touched && openTrades.size() < maxOpenTrades) {
-					SimulatedTrade trade = new SimulatedTrade(
-							p.signal(), p.effectiveEntry(), p.sl(), p.tp());
-					openTrades.add(trade);
-					allTrades.add(trade);
-				} else if (expired) {
-					signalsExpiredUnfilled++;
-				} else {
-					// Still waiting -- either untouched, or touched but at
-					// capacity (mirrors OrderManager only opening once a
-					// slot is free; the order itself stays live at OANDA).
-					stillPending.add(p);
-				}
-			}
-			pendingSignals = stillPending;
 
 			if (openTrades.size() >= maxOpenTrades)
 				continue;
@@ -428,14 +397,14 @@ public class BacktestEngine {
 			long sl, tp1, tp2;
 			if (s.bias() == MarketBias.BULLISH) {
 				// Long: enter at ask (ideal entry + half spread)
-				effectiveEntry = s.idealEntry() + (spreadScaled / 2);
+				long effectiveEntry = s.idealEntry() + (spreadScaled / 2);
 				sl = s.sweepPrice() - slBufferScaled;
 				long risk = effectiveEntry - sl;
 				tp1 = effectiveEntry + (long) (risk * TP1_RISK_MULTIPLE);
 				tp2 = effectiveEntry + (long) (risk * TP2_RISK_MULTIPLE);
 			} else {
 				// Short: enter at bid (ideal entry - half spread)
-				effectiveEntry = s.idealEntry() - (spreadScaled / 2);
+				long effectiveEntry = s.idealEntry() - (spreadScaled / 2);
 				sl = s.sweepPrice() + slBufferScaled;
 				long risk = sl - effectiveEntry;
 				tp1 = effectiveEntry - (long) (risk * TP1_RISK_MULTIPLE);
@@ -458,13 +427,11 @@ public class BacktestEngine {
 			}
 		}
 
-		System.out.println("  Signals generated:  " + signalsGenerated);
-		System.out.println("  Contexts rejected:  " + signalsRejected);
-		System.out.println("  Expired unfilled:   " + signalsExpiredUnfilled);
-		System.out.println("  Still pending:      " + pendingSignals.size());
-		System.out.println("  Total trades:       " + allTrades.size());
+		System.out.println("  Signals generated: " + signalsGenerated);
+		System.out.println("  Contexts rejected: " + signalsRejected);
+		System.out.println("  Total trades:      " + allTrades.size());
 
-		return new BacktestResult(allTrades, signalsGenerated, signalsRejected, signalsExpiredUnfilled);
+		return new BacktestResult(allTrades, signalsGenerated, signalsRejected);
 	}
 
 	/**
