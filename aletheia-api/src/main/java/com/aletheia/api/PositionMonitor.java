@@ -21,24 +21,30 @@ import java.util.Optional;
  * Watches open positions and drives the breakeven / partial-TP trade-management
  * flow — the live counterpart of the backtest's SimulatedTrade logic.
  *
- * STAGE 3: RECONCILE + ACT.
+ * STAGE 4: RECONCILE + ACT + REAL P&L.
  *
  * Each 10s cycle:
  * 1. RECONCILE fills — PENDING orders that appear as broker trades -> FILLED
- * 2. RECONCILE closes — open orders that vanished broker-side -> CLOSED
+ * 2. RECONCILE closes — open orders that vanished broker-side -> CLOSED,
+ * recording OANDA's authoritative realized P&L (USD)
  * 3. MANAGE TP1 — FILLED orders whose price reached TP1:
  * a) close 70% of the position
  * b) move the stop to breakeven (entry)
- * After this the runner (30%) rides to TP2, which the
- * broker enforces (takeProfitOnFill), with the
- * breakeven stop protecting it on a reversal.
+ * recording the partial's realized P&L (USD)
+ *
+ * P&L ACCOUNTING:
+ * OANDA's realizedPL is CUMULATIVE per trade (it grows as the trade partially
+ * then fully closes). ManagedOrder.realisedPnl ACCUMULATES the values we feed
+ * it. So at each close point we feed only the INCREMENT since we last booked:
+ * OANDA_total_realized - order.realisedPnl(). All figures are account home
+ * currency (USD), not pips.
  *
  * SAFETY GUARDS:
  * - Only trades WE placed (clientId matches a ManagedOrder) are ever touched.
- * - TP1 management runs ONLY for orders in state FILLED (not PENDING, not
- * already PARTIAL, not CLOSED) — so the 70% close happens at most once.
- * - Every broker action is checked; on failure we log and leave state
- * unchanged so the next cycle retries rather than corrupting our view.
+ * - TP1 management runs ONLY for orders in state FILLED (so the 70% close
+ * happens at most once).
+ * - Broker actions are checked; on failure we log and leave state unchanged so
+ * the next cycle retries rather than corrupting our view.
  */
 @Component
 @Profile("!test")
@@ -87,13 +93,26 @@ public class PositionMonitor {
 
 	private void reconcileCloses(Map<String, BrokerTrade> byClientId) {
 		for (ManagedOrder order : orderManager.openPositions()) {
-			if (!byClientId.containsKey(order.id())) {
-				// Placeholder close price — refined later via OANDA realizedPL.
-				order.onFullClose(order.currentSl(), Instant.now(), 0.0);
-				System.out.println("[PositionMonitor] CLOSE (broker-side): order "
-						+ shortId(order.id()) + " " + order.instrument()
-						+ " -> " + order.state());
+			if (byClientId.containsKey(order.id())) {
+				continue; // still open
 			}
+
+			// Trade closed broker-side (SL or TP2 hit). Fetch OANDA's authoritative
+			// cumulative realized P&L and book only the increment since last time.
+			double increment = 0.0;
+			String tradeId = order.oandaTradeId();
+			if (tradeId != null) {
+				Optional<Double> total = broker.getRealizedPnl(tradeId);
+				if (total.isPresent()) {
+					increment = total.get() - order.realisedPnl();
+				}
+			}
+
+			order.onFullClose(order.currentSl(), Instant.now(), increment);
+			System.out.println("[PositionMonitor] CLOSE (broker-side): order "
+					+ shortId(order.id()) + " " + order.instrument()
+					+ " -> " + order.state()
+					+ " | realised P&L $" + String.format("%.2f", order.realisedPnl()));
 		}
 	}
 
@@ -101,33 +120,29 @@ public class PositionMonitor {
 
 	private void manageTp1(Map<String, BrokerTrade> byClientId) {
 		for (ManagedOrder order : orderManager.openPositions()) {
-			// Only manage TP1 for freshly FILLED orders — not ones already
-			// partialled. isOpen() covers FILLED and PARTIAL, so gate on state.
 			if (order.state() != OrderState.FILLED) {
-				continue;
+				continue; // only freshly-filled orders; skip already-partialled
 			}
 
 			BrokerTrade t = byClientId.get(order.id());
 			if (t == null) {
-				continue; // not currently open on broker (will be close-reconciled)
+				continue;
 			}
 
 			Optional<Long> priceOpt = broker.getCurrentPrice(order.instrument());
 			if (priceOpt.isEmpty()) {
-				continue; // no price this cycle — try again next time
+				continue;
 			}
 			long price = priceOpt.get();
 
 			if (!tp1Reached(order, price)) {
-				continue; // target not hit yet
+				continue;
 			}
 
-			// TP1 reached — execute the two-step management action.
 			executeTp1(order, t);
 		}
 	}
 
-	/** True if the current price has reached the order's TP1 target. */
 	private boolean tp1Reached(ManagedOrder order, long price) {
 		if (order.direction() == MarketBias.BULLISH) {
 			return price >= order.tp1();
@@ -137,19 +152,17 @@ public class PositionMonitor {
 	}
 
 	/**
-	 * Closes 70% of the position and moves the stop to breakeven. Order of
-	 * operations matters: close the partial FIRST, then move the stop. If the
-	 * partial close fails we abort and retry next cycle — we never move the stop
-	 * on a position we failed to reduce.
+	 * Closes 70% of the position and moves the stop to breakeven. Close FIRST,
+	 * then move the stop — if the partial close fails we abort and retry next
+	 * cycle rather than moving the stop on an un-reduced position.
 	 */
 	private void executeTp1(ManagedOrder order, BrokerTrade t) {
 		String tradeId = t.brokerTradeId();
 
-		// Units to close = 70% of the CURRENTLY OPEN units, unsigned.
 		long openUnits = Math.abs(t.currentUnits());
 		long unitsToClose = (long) (openUnits * TP1_CLOSE_FRACTION);
 		if (unitsToClose <= 0) {
-			return; // nothing meaningful to close (tiny position)
+			return;
 		}
 
 		// Step 1: partial close (70%)
@@ -157,10 +170,10 @@ public class PositionMonitor {
 		if (!closed) {
 			System.err.println("[PositionMonitor] TP1 partial close FAILED for "
 					+ shortId(order.id()) + " -- will retry next cycle");
-			return; // abort: do NOT move stop if we didn't reduce the position
+			return;
 		}
 
-		// Step 2: move stop to breakeven (entry / fill price)
+		// Step 2: move stop to breakeven (fill price)
 		long breakeven = order.filledPrice();
 		boolean moved = broker.modifyStopLoss(tradeId, breakeven, order.instrument());
 		if (!moved) {
@@ -169,14 +182,20 @@ public class PositionMonitor {
 					+ " (trade " + tradeId + "). Runner is unprotected at breakeven!");
 		}
 
-		// Update our internal state: 70% closed, SL now at breakeven.
-		// pnl left 0.0 — real P&L accounting comes with the OANDA realizedPL pass.
-		order.onPartialClose(order.tp1(), 0.0);
+		// Book the partial's realized P&L (increment since last booked).
+		double increment = 0.0;
+		Optional<Double> total = broker.getRealizedPnl(tradeId);
+		if (total.isPresent()) {
+			increment = total.get() - order.realisedPnl();
+		}
+
+		order.onPartialClose(order.tp1(), increment);
 
 		System.out.println("[PositionMonitor] TP1 HIT: order " + shortId(order.id())
 				+ " " + order.instrument() + " -- closed " + unitsToClose
 				+ " units (70%), SL -> breakeven " + breakeven
-				+ ", runner riding to TP2 " + order.tp2());
+				+ ", runner -> TP2 " + order.tp2()
+				+ " | partial P&L $" + String.format("%.2f", order.realisedPnl()));
 	}
 
 	private static String shortId(String id) {

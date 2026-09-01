@@ -376,6 +376,37 @@ public class OandaOrderExecutor implements BrokerExecutor{
 		}
 	}
 
+	/**
+	 * Fetches a trade's realised P&L (account currency) from OANDA.
+	 *
+	 * OANDA endpoint: GET /accounts/{id}/trades/{tradeId}
+	 * The "trade" object carries "realizedPL" as a decimal string.
+	 */
+	@Override
+	public java.util.Optional<Double> getRealizedPnl(String tradeId) {
+		if (isCircuitOpen()) {
+			return java.util.Optional.empty();
+		}
+
+		String endpoint = "/accounts/" + accountId + "/trades/" + tradeId;
+
+		return executeGet(endpoint).flatMap(root -> {
+			JsonNode trade = root.path("trade");
+			if (trade.isMissingNode()) {
+				return java.util.Optional.empty();
+			}
+			String pl = trade.path("realizedPL").asText(null);
+			if (pl == null) {
+				return java.util.Optional.empty();
+			}
+			try {
+				return java.util.Optional.of(Double.parseDouble(pl));
+			} catch (NumberFormatException e) {
+				return java.util.Optional.empty();
+			}
+		});
+	}
+
 	// -- Utility -------------------------------------------------------
 
 	/**

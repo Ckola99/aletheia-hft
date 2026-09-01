@@ -262,7 +262,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Most recent realised P&L in pips.",
+      "description": "Cumulative realised profit/loss across all trades, in account currency (USD).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -315,13 +315,13 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "aletheia_pnl_pips",
+          "expr": "aletheia_realized_pnl",
           "legendFormat": "P&L (pips)",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "P&L (pips)",
+      "title": "Realized P&L ($)",
       "type": "stat"
     },
     {

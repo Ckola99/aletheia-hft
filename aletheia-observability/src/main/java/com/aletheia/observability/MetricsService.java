@@ -58,7 +58,7 @@ public class MetricsService {
 		registry.gauge("aletheia.open.positions", openPositions);
 		registry.gauge("aletheia.kill.switch.active", killSwitchActive);
 		registry.gauge("aletheia.stream.connected", streamConnected);
-		registry.gauge("aletheia.pnl.pips", lastPnlPips);
+		registry.gauge("aletheia.realized.pnl", lastPnlPips);
 		registry.gauge("aletheia.ticks.received", tickCount);
 	}
 

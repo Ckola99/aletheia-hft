@@ -107,4 +107,15 @@ public interface BrokerExecutor {
 	 * @param instrument e.g. "EUR_USD"
 	 */
 	java.util.Optional<Long> getCurrentPrice(String instrument);
+
+	/**
+	 * Fetches the realised profit/loss for a trade, in account home currency
+	 * (e.g. USD). realizedPL accumulates as a trade is partially and then fully
+	 * closed, so this works whether the trade is open, reduced, or closed.
+	 *
+	 * READ-ONLY. Returns empty if the trade can't be fetched.
+	 *
+	 * @param tradeId the broker's trade ID
+	 */
+	java.util.Optional<Double> getRealizedPnl(String tradeId);
 }

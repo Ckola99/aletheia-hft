@@ -57,5 +57,11 @@ public class MetricsUpdater {
 		metrics.setOpenPositions(orderManager.openPositionCount());
 
 		metrics.setTickCount(pricingStream.tickCount());
+
+				// Sum realised P&L (USD) across all orders and publish it.
+		double totalRealized = orderManager.allOrders().stream()
+				.mapToDouble(o -> o.realisedPnl())
+				.sum();
+		metrics.setPnlPips(totalRealized);
 	}
 }
