@@ -13,6 +13,7 @@ import com.aletheia.execution.ManagedOrder;
 import com.aletheia.execution.OrderManager;
 import com.aletheia.execution.BrokerExecutor;
 import com.aletheia.strategy.*;
+import com.aletheia.observability.MetricsService;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -115,6 +116,7 @@ public class LiveSignalService implements CandleListener {
 	private final KillSwitch killSwitch;
 	private final DxyFeedService dxyFeed;
 	private final Executor evaluationExecutor;
+	private final MetricsService metrics;
 
 	// ── Config ─────────────────────────────────────────────────────────
 	private final String[] instruments; // TRADE set
@@ -149,6 +151,7 @@ public class LiveSignalService implements CandleListener {
 			OrderManager orderManager,
 			BrokerExecutor executor,
 			KillSwitch killSwitch,
+			MetricsService metrics,
 			DxyFeedService dxyFeed,
 			@Value("${trading.instruments}") String[] instruments,
 			@Value("${trading.htf-timeframe:HOUR_1}") String htfName,
@@ -160,7 +163,7 @@ public class LiveSignalService implements CandleListener {
 
 		this(aggregator, candleRepository, signalAggregator, usdxBiasEngine,
 				killzoneService, calendarService, smtRegistry, smtDetector,
-				orderManager, executor, killSwitch, dxyFeed, instruments,
+				orderManager, executor, killSwitch, metrics, dxyFeed, instruments,
 				htfName, ltfName, usdxSource, defaultBalance,
 				smtPairsRaw, smtPartners,
 				Executors.newSingleThreadExecutor(r -> {
@@ -182,6 +185,7 @@ public class LiveSignalService implements CandleListener {
 			OrderManager orderManager,
 			BrokerExecutor executor,
 			KillSwitch killSwitch,
+			MetricsService metrics,
 			DxyFeedService dxyFeed,
 			String[] instruments,
 			String htfName,
@@ -203,6 +207,7 @@ public class LiveSignalService implements CandleListener {
 		this.orderManager = orderManager;
 		this.executor = executor;
 		this.killSwitch = killSwitch;
+		this.metrics = metrics;
 		this.dxyFeed = dxyFeed;
 		this.instruments = instruments;
 		this.usdxSource = usdxSource;
@@ -305,6 +310,10 @@ public class LiveSignalService implements CandleListener {
 			return;
 
 		evaluationsTriggered.incrementAndGet();
+		if (metrics != null) {
+			metrics.recordCandle(candle.instrument(), candle.timeframe().name());
+		}
+
 		final String instrument = candle.instrument();
 		final Instant now = candle.time();
 
@@ -341,6 +350,9 @@ public class LiveSignalService implements CandleListener {
 
 		// Pillar 3: news blackout
 		boolean newsBlackout = calendarService.isNewsBlackout(now, instrument);
+		if (newsBlackout && metrics != null) {
+			metrics.recordNewsBlackout(instrument);
+		}
 
 		MarketContext ctx = new MarketContext(
 				now, instrument, killzone, usdxBias,
@@ -353,6 +365,9 @@ public class LiveSignalService implements CandleListener {
 			return;
 
 		TradeSignal signal = maybeSignal.get();
+		if (metrics != null) {
+			metrics.recordSignal(signal.grade().name(), instrument);
+		}
 
 		// Size the position off the live account balance (fallback if unavailable)
 		double balance = executor.getAccountBalance().orElse(defaultBalance);
@@ -366,6 +381,10 @@ public class LiveSignalService implements CandleListener {
 		brokerOrderId.ifPresent(order::setOandaOrderId);
 
 		ordersPlaced.incrementAndGet();
+		if (metrics != null) {
+			metrics.recordOrderPlaced(instrument, signal.bias().name());
+		}
+		
 		System.out.println("[LiveSignalService] Order placed for " + instrument
 				+ " " + signal.bias() + " grade=" + signal.grade()
 				+ " brokerId=" + brokerOrderId.orElse("FAILED"));

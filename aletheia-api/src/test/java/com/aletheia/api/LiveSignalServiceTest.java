@@ -80,6 +80,7 @@ class LiveSignalServiceTest {
 				om,
 				exec,
 				killSwitch,
+				null,
 				null, // DxyFeedService — not needed for these tests
 				new String[] { "EUR_USD", "GBP_USD" },
 				"HOUR_1", "MIN_5", "EUR_USD", 100_000,
