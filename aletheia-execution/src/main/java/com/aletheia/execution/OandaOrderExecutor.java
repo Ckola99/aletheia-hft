@@ -79,6 +79,7 @@ public class OandaOrderExecutor implements BrokerExecutor{
 		String tpPrice = formatPrice(order.tp2(), instrument);
 
 		String clientId = order.id();
+		System.out.println("[ORDER.PRICE]: " + price);
 		String json = """
 				{
 				    "order": {
@@ -100,6 +101,7 @@ public class OandaOrderExecutor implements BrokerExecutor{
 				}
 				""".formatted(instrument, signedUnits, price, clientId, slPrice, tpPrice);
 
+		System.out.println("[DEBUG] OANDA order JSON: " + json);
 		return executePost("/accounts/" + accountId + "/orders", json)
 				.map(node -> {
 					String orderId = node.path("orderCreateTransaction")
@@ -416,6 +418,6 @@ public class OandaOrderExecutor implements BrokerExecutor{
 	private String formatPrice(long scaledPrice, String instrument) {
 		double price = PriceScale.toDouble(scaledPrice, instrument);
 		int decimals = instrument.contains("JPY") ? 3 : 5;
-		return String.format("%." + decimals + "f", price);
+		return String.format(java.util.Locale.US, "%." + decimals + "f", price);
 	}
 }
