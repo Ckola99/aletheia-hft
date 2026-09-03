@@ -91,6 +91,9 @@ public class OandaOrderExecutor implements BrokerExecutor{
 				        "clientExtensions": {
 				            "id": "%s"
 				        },
+					"tradeClientExtensions": {
+						            "id": "%s"
+				        },
 				        "stopLossOnFill": {
 				            "price": "%s"
 				        },
@@ -99,7 +102,7 @@ public class OandaOrderExecutor implements BrokerExecutor{
 				        }
 				    }
 				}
-				""".formatted(instrument, signedUnits, price, clientId, slPrice, tpPrice);
+				""".formatted(instrument, signedUnits, price, clientId, clientId, slPrice, tpPrice);
 
 		System.out.println("[DEBUG] OANDA order JSON: " + json);
 		return executePost("/accounts/" + accountId + "/orders", json)
